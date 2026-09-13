@@ -141,6 +141,20 @@ public class NeovideCaretManager implements EditorFactoryListener {
         }
     }
 
+    // ==================== 渲染模式切换 ====================
+
+    /** 切换拖尾渲染模式（弹簧 / 残影），并重置所有编辑器的动画状态 */
+    public static void setTrailMode(NeovideConfig.TrailMode mode) {
+        CONFIG.trailMode = mode;
+        for (CaretAnimator animator : ANIMATORS.values()) {
+            animator.onModeChanged();
+        }
+    }
+
+    public static NeovideConfig.TrailMode getTrailMode() {
+        return CONFIG.trailMode;
+    }
+
     // ==================== 启用 / 禁用 ====================
 
     /** 切换拖尾效果开关 */

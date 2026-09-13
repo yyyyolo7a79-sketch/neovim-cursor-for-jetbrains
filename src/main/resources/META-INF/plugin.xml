@@ -31,5 +31,12 @@
                 description="跳过重绘只跑计算，用于分离瓶颈：是绘制慢还是 EDT 调度慢">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
+
+        <action id="NeovideCursor.TrailMode"
+                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleTrailModeAction"
+                text="Neovide 光标：残影模式（低帧率更稳）"
+                description="勾选切换到残影轨迹模型（记录真实历史位置，掉帧不失真）；取消则回到弹簧拉伸模型（Neovide 原版效果）">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

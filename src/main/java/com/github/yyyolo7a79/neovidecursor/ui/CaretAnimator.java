@@ -1,5 +1,6 @@
 package com.github.yyyolo7a79.neovidecursor.ui;
 
+import com.github.yyyolo7a79.neovidecursor.core.AfterimageTrail;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.intellij.openapi.Disposable;
@@ -16,6 +17,8 @@ import java.awt.Component;
 import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -86,6 +89,13 @@ public class CaretAnimator implements Disposable, CaretListener {
     private final CaretTrailPanel panel;
     private final NeovideConfig config;
     private final TrailCorner[] corners;
+
+    // ===== 残影模型（trailMode = AFTERIMAGE 时使用）=====
+
+    private final AfterimageTrail afterimageTrail;
+
+    /** 残影绘制数据缓冲（每项 [x, y, w, h, alpha]），避免每帧重建列表 */
+    private final List<float[]> ghostBuffer = new ArrayList<>(32);
 
     /** 辉光最大外扩量，用于计算重绘区域需要留出的余量（随光标尺寸动态更新） */
     private int glowPadding;
@@ -174,6 +184,9 @@ public class CaretAnimator implements Disposable, CaretListener {
         for (int i = 0; i < CORNER_RELATIVE.length; i++) {
             corners[i] = new TrailCorner(CORNER_RELATIVE[i][0], CORNER_RELATIVE[i][1], config);
         }
+
+        this.afterimageTrail = new AfterimageTrail(config);
+        afterimageTrail.setLifetime(config.afterimageLifetime);
 
         // 重绘区域必须覆盖辉光的外扩部分，否则光晕边缘会残留脏像素。
         // 辉光半径 = shadowBlurFactor × 光标较长边，这里先用典型行高 32 估算，
@@ -300,26 +313,9 @@ public class CaretAnimator implements Disposable, CaretListener {
         smoothedDt += (dt - smoothedDt) * 0.25;
         double effectiveDt = Math.max(dt, smoothedDt);
 
-        if (jumped) {
-            assignRanks(effectiveDt);
-            jumped = false;
-        }
-
-        boolean anyAnimating = false;
-        for (TrailCorner corner : corners) {
-            if (corner.update(cursorWidth, cursorHeight, centerX, centerY, dt, false)) {
-                anyAnimating = true;
-            }
-        }
-
-        if (moved || anyAnimating) {
-            panel.updateCorners(
-                    corners[0].getCurrentX(), corners[0].getCurrentY(),
-                    corners[1].getCurrentX(), corners[1].getCurrentY(),
-                    corners[2].getCurrentX(), corners[2].getCurrentY(),
-                    corners[3].getCurrentX(), corners[3].getCurrentY());
-            repaintTrail();
-        }
+        boolean anyAnimating = (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE)
+                ? tickAfterimage(now, moved)
+                : tickSpring(dt, effectiveDt);
 
         currentDelayMs = computeNextDelay(moved || anyAnimating);
 
@@ -390,34 +386,6 @@ public class CaretAnimator implements Disposable, CaretListener {
             peakRepaintArea = 0;
             fpsWindowStart = now;
         }
-    }
-
-    /**
-     * 只重绘拖尾占据的小块区域。
-     *
-     * <p>覆盖整个编辑器的面板若每帧全量重绘（例如 1125×992），
-     * 在快速移动光标时会明显掉帧。这里只重绘拖尾的包围盒加辉光余量。
-     *
-     * <p><b>关键</b>：上一帧区域与当前帧区域必须<b>分别</b>提交重绘请求，
-     * 绝不能先 union 成一个大矩形 —— 大跨度移动（Tab 补全跳转、跨行删除）时
-     * 两点相距很远，合并后的矩形会覆盖大半个编辑器，直接把优化抵消掉。
-     */
-    private void repaintTrail() {
-        // 性能诊断模式：跳过全部重绘，只跑物理计算。
-        // 用于分离瓶颈 —— 若跳过重绘后 fps 立刻升高，说明瓶颈在绘制；
-        // 若 fps 仍低，说明瓶颈在 EDT 调度/负载，换窗口方案也无济于事。
-        if (NeovideCaretManager.isPaintDisabled()) {
-            return;
-        }
-
-        computeTrailBounds(currentBounds);
-
-        // 上一帧的位置：必须重绘才能擦除残影
-        repaintRegion(lastDirtyRegion);
-        // 当前帧的位置
-        repaintRegion(currentBounds);
-
-        lastDirtyRegion.setBounds(currentBounds);
     }
 
     /** 把区域裁剪到面板范围内后提交重绘，越界部分直接丢弃 */
@@ -531,6 +499,150 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 编辑器正在销毁或重绘中：本次跳过，下一帧会自动重试
             return false;
         }
+    }
+
+    // ==================== 两种渲染模式 ====================
+
+    /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
+    private boolean tickSpring(double dt, double effectiveDt) {
+        if (jumped) {
+            assignRanks(effectiveDt);
+            jumped = false;
+        }
+
+        boolean anyAnimating = false;
+        for (TrailCorner corner : corners) {
+            if (corner.update(cursorWidth, cursorHeight, centerX, centerY, dt, false)) {
+                anyAnimating = true;
+            }
+        }
+
+        panel.updateCorners(
+                corners[0].getCurrentX(), corners[0].getCurrentY(),
+                corners[1].getCurrentX(), corners[1].getCurrentY(),
+                corners[2].getCurrentX(), corners[2].getCurrentY(),
+                corners[3].getCurrentX(), corners[3].getCurrentY());
+
+        computeTrailBounds(currentBounds);
+        submitRepaint();
+        return anyAnimating;
+    }
+
+    /**
+     * 残影模式的一帧：记录当前位置并绘制历史残影。
+     *
+     * <p>不涉及任何物理模拟或帧间插值 —— 位置直接来自每帧的真实采样，
+     * 因此掉帧只会让残影稀疏，轨迹本身绝不失真。
+     * 这正是它比弹簧模型更适合低帧率环境的原因。
+     */
+    private boolean tickAfterimage(long now, boolean moved) {
+        afterimageTrail.record(centerX, centerY, cursorWidth, cursorHeight, now);
+
+        List<AfterimageTrail.Ghost> visible = afterimageTrail.collectVisible(now);
+
+        ghostBuffer.clear();
+
+        // ---- 第一部分：残影尾巴 ----
+        // 跳过与当前光标位置重合的采样点，否则会和下面那个常驻光标叠在一起、
+        // 半透明颜色叠加导致该处明显偏深。
+        for (AfterimageTrail.Ghost ghost : visible) {
+            if (ghost.centerX == centerX && ghost.centerY == centerY) {
+                continue;
+            }
+            float alpha = afterimageTrail.alphaOf(ghost, now);
+            if (alpha <= 0.02f) {
+                continue;
+            }
+            ghostBuffer.add(new float[]{
+                    (float) (ghost.centerX - ghost.width / 2.0),
+                    (float) (ghost.centerY - ghost.height / 2.0),
+                    (float) ghost.width,
+                    (float) ghost.height,
+                    alpha
+            });
+        }
+
+        boolean hasTail = !ghostBuffer.isEmpty();
+
+        // ---- 第二部分：常驻光标 ----
+        // 残影会在 lifetime 到期后淡出，若只画残影，光标静止一会儿画面就空了。
+        // 因此额外绘制一个始终完全不透明的"光标本体"。
+        ghostBuffer.add(new float[]{
+                (float) (centerX - cursorWidth / 2.0),
+                (float) (centerY - cursorHeight / 2.0),
+                (float) cursorWidth,
+                (float) cursorHeight,
+                1.0f
+        });
+
+        if (moved || hasTail) {
+            panel.updateGhosts(ghostBuffer);
+            computeGhostBounds(currentBounds);
+            submitRepaint();
+        }
+
+        // 只有尾巴还在渐隐时才需要持续高帧率；只剩常驻光标时无需空转
+        return hasTail;
+    }
+
+    /** 提交重绘：本帧区域 + 上一帧区域（后者用于擦除残影） */
+    private void submitRepaint() {
+        // 性能诊断模式：跳过全部重绘，只跑计算
+        if (NeovideCaretManager.isPaintDisabled()) {
+            return;
+        }
+
+        repaintRegion(lastDirtyRegion);
+        repaintRegion(currentBounds);
+        lastDirtyRegion.setBounds(currentBounds);
+    }
+
+    /** 计算残影列表的包围盒（含辉光余量），结果写入 out 以避免分配 */
+    private void computeGhostBounds(Rectangle out) {
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+
+        for (float[] shape : ghostBuffer) {
+            if (shape[0] < minX) {
+                minX = shape[0];
+            }
+            if (shape[1] < minY) {
+                minY = shape[1];
+            }
+            if (shape[0] + shape[2] > maxX) {
+                maxX = shape[0] + shape[2];
+            }
+            if (shape[1] + shape[3] > maxY) {
+                maxY = shape[1] + shape[3];
+            }
+        }
+
+        int pad = glowPadding;
+        out.setBounds(
+                (int) Math.floor(minX) - pad,
+                (int) Math.floor(minY) - pad,
+                (int) Math.ceil(maxX - minX) + pad * 2,
+                (int) Math.ceil(maxY - minY) + pad * 2);
+    }
+
+    /** 渲染模式切换后调用：清空两种模型的内部状态，避免残留 */
+    public void onModeChanged() {
+        afterimageTrail.clear();
+        afterimageTrail.setLifetime(config.afterimageLifetime);
+
+        for (TrailCorner corner : corners) {
+            corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
+        }
+
+        panel.clearCorners();
+        panel.refreshStyles();
+
+        // 让下一帧强制重算位置，避免快速路径把旧状态固化
+        forceResync = true;
+        lastDirtyRegion.setBounds(0, 0, 0, 0);
+        wakeUp();
     }
 
     /**

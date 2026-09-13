@@ -96,4 +96,26 @@ public class NeovideConfig {
 
     /** 全局开关：关掉后立即恢复原生光标与干净界面 */
     public boolean enabled = true;
+
+    // ===== 渲染模式 =====
+
+    /** 拖尾渲染模式：弹簧（Neovide 原版效果）或残影（低帧率更稳） */
+    public TrailMode trailMode = TrailMode.SPRING;
+
+    /**
+     * 残影存活时长（秒）：仅 {@link TrailMode#AFTERIMAGE} 使用。
+     * 数值越大，拖尾越长。
+     */
+    public float afterimageLifetime = 0.22f;
+
+    /** 拖尾渲染模式 */
+    public enum TrailMode {
+        /** 弹簧模型：光标被拉伸成四边形 —— Neovide 原版效果 */
+        SPRING,
+        /**
+         * 残影模型：一串渐隐的残影。
+         * 它记录的是每帧的真实位置而非帧间插值，因此低帧率下更稳定。
+         */
+        AFTERIMAGE
+    }
 }
