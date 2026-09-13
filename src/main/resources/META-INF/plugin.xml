@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin>
+    <id>com.github.yyyolo7a79.neovidecursor</id>
+    <name>Neovide Cursor</name>
+    <vendor>yyyyolo7a79</vendor>
+
+    <description><![CDATA[
+    Neovide 风格「拖尾光标」—— 光标移动时留下渐隐的拉伸残影，带辉光效果。
+    <br/>
+    参数语义与 VS Code 版 neovide-cursor 保持一致，便于跨平台迁移配置。
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- 拖尾光标主入口：为每个编辑器挂载动画覆盖层 -->
+        <editorFactoryListener implementation="com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager"/>
+    </extensions>
+
+    <actions>
+        <action id="NeovideCursor.Toggle"
+                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleNeovideAction"
+                text="Neovide 拖尾光标（开关）"
+                description="启用或禁用拖尾光标效果；关闭时会恢复原生光标">
+            <add-to-group group-id="ToolsMenu" anchor="first"/>
+        </action>
+    </actions>
+</idea-plugin>

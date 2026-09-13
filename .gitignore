@@ -1,0 +1,16 @@
+# ===== 构建产物 =====
+build/
+.gradle/
+.intellijPlatform/
+
+# ===== IDE 配置 =====
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# ===== 调试用截图（用户反馈的临时图片，不入库） =====
+image*.png
+
+# ===== 其他 =====
+*.log
