@@ -1,6 +1,9 @@
 # Neovim Cursor for JetBrains IDE
 
-> 把 **Neovide 风格的拖尾光标**带到 JetBrains IDE —— 光标移动时留下渐隐的拉伸残影，带辉光光晕。
+> 把 **Neovide 风格的拖尾光标**带到 JetBrains IDE —— 光标移动时留下渐隐的拖尾，带辉光光晕。
+>
+> **适用**：IntelliJ IDEA / CLion / PyCharm 等 **2025.2 系** JetBrains IDE
+> （已实测通过，详见[兼容性](#兼容性)）
 
 ⚠️ **实验性项目**：核心效果已可用，但受限于 Swing/AWT 的渲染机制，帧率不及 Electron 系的 VS Code 版。
 **欢迎有缘人继续优化** —— 文末附完整的踩坑记录与技术分析，希望能帮你少走弯路。
@@ -55,6 +58,41 @@ dependencies {
     }
 }
 ```
+
+---
+
+## 兼容性
+
+**已在以下 IDE 实测通过**：
+
+| IDE | 版本 | 状态 |
+|---|---|---|
+| IntelliJ IDEA | 2025.2 | ✅ |
+| CLion | 2025.2 | ✅ |
+| PyCharm | 2025.2 | ✅ |
+
+**为什么能跨 IDE 通用**：插件只依赖 `com.intellij.modules.platform`
+（平台核心模块），不涉及任何语言特有的 API，也不依赖 IDEA Ultimate 的专有功能。
+因此**理论上适用于所有 2025.2 系的 JetBrains IDE** ——
+WebStorm / PhpStorm / GoLand / RubyMine / Rider / DataGrip 等，
+只是尚未逐一实测。
+
+**版本限制**：`sinceBuild=252` / `untilBuild=252.*`，即**仅支持 2025.2 系**。
+若需支持其他版本，在 `build.gradle.kts` 中调整 `ideaVersion` 后重新构建即可：
+
+```kotlin
+intellijPlatform {
+    pluginConfiguration {
+        ideaVersion {
+            sinceBuild.set("252")   // 改成目标版本，如 251 / 253
+            untilBuild.set("252.*")
+        }
+    }
+}
+```
+
+> ⚠️ 注意：`sinceBuild` 往低版本放宽存在风险 —— 平台 API 在小版本间也可能变化，
+> 建议实际编译并运行验证后再发布。
 
 ---
 
