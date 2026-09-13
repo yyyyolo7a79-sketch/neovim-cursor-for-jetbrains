@@ -12,6 +12,16 @@ package com.github.yyyolo7a79.neovidecursor.core;
  */
 public class TrailCorner {
 
+    /**
+     * 动画至少跨越的帧数（低帧率适配）。
+     *
+     * <p>{@link DampedSpring#update} 开头有「animationLength 小于一帧就直接归零」的短路，
+     * 本意是省掉无意义的极短动画。但在帧率只有 20~30fps 时 dt ≈ 0.03~0.05s，
+     * 而相邻两行移动的动画时长恰为 0.015~0.05s —— 动画被整体吃掉，
+     * 光标瞬间闪到目标，视觉上就是"卡"。这也是"十几行跳转反而更流畅"的原因。
+     */
+    private static final double MIN_ANIMATION_FRAMES = 6.0;
+
     /** 角点相对光标矩形的归一化位置，例如 (-0.5, -0.5) 表示左上角 */
     private final double relativeX;
     private final double relativeY;
@@ -86,9 +96,11 @@ public class TrailCorner {
      *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
      *
-     * @param rank 按对齐度排序后的名次（0 = 最靠前，最跟手）
+     * @param rank    按对齐度排序后的名次（0 = 最靠前，最跟手）
+     * @param frameDt 当前帧间隔（秒），用于低帧率下的动画时长补偿；传 0 表示不补偿
      */
-    public void jump(double width, double height, double centerX, double centerY, int rank) {
+    public void jump(double width, double height, double centerX, double centerY,
+                     int rank, double frameDt) {
         double destX = destX(centerX, width);
         double destY = destY(centerY, height);
 
@@ -117,6 +129,18 @@ public class TrailCorner {
         double animationLength = useSnap
                 ? config.snapAnimationLength
                 : baseTime * clamp(factor, 0, 1);
+
+        // 【低帧率适配】保证动画至少跨越若干帧。
+        //
+        // DampedSpring.update() 开头的短路条件 `animationLength <= dt` 本意是
+        // "动画比一帧还短就没必要做"，但帧率降到 20~30fps 时 dt ≈ 0.03~0.05s，
+        // 恰好把相邻两行移动的短动画（0.015~0.05s）整体吃掉 ——
+        // 表现为光标瞬间闪到目标位置、看起来"卡住"。
+        //
+        // 硬吸附（useSnap）的角本就该瞬间到位，不做延长。
+        if (!useSnap && frameDt > 0) {
+            animationLength = Math.max(animationLength, frameDt * MIN_ANIMATION_FRAMES);
+        }
 
         springX.setAnimationLength(animationLength);
         springY.setAnimationLength(animationLength);

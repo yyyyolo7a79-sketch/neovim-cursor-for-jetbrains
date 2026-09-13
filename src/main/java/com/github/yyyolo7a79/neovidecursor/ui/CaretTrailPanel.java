@@ -36,10 +36,12 @@ public class CaretTrailPanel extends JComponent {
     /** 是否已有可绘制数据（光标不可见时应为 false） */
     private boolean hasData = false;
 
-    /** 缓存解析后的颜色与辉光宽度，避免每帧重复解析字符串 */
+    /** 缓存解析后的颜色，避免每帧重复解析字符串 */
     private Color fillColor;
     private Color glowColor;
-    private float glowWidth;
+
+    /** 辉光最大外扩量：= shadowBlurFactor × 光标较长边，与原版 shadowBlur 语义一致 */
+    private float glowWidth = 12f;
 
     public CaretTrailPanel(@NotNull NeovideConfig config) {
         this.config = config;
@@ -51,8 +53,22 @@ public class CaretTrailPanel extends JComponent {
     public void refreshStyles() {
         fillColor = NeovideColors.parse(config.tailColor, config.tailOpacity);
         glowColor = NeovideColors.parse(config.shadowColor, 1.0f);
-        // 辉光宽度刻意取小值：单层描边过宽会让光标看起来"套了个壳"
-        glowWidth = Math.max(3f, config.glowWidthFactor * 24f);
+    }
+
+    /**
+     * 按光标尺寸更新辉光半径。
+     *
+     * <p>与原版语义对齐：{@code shadowBlur = shadowBlurFactor × max(width, height)}。
+     *
+     * <p>注意实际可见的外扩只有该值的一半 —— 因为光晕用<b>居中描边</b>绘制，
+     * 一半压在光标内部（被主体覆盖），一半露在外面形成光晕。
+     */
+    public void updateGlowRadius(double cursorWidth, double cursorHeight) {
+        double maxDim = Math.max(cursorWidth, cursorHeight);
+        float newWidth = (float) (config.shadowBlurFactor * maxDim);
+        if (Math.abs(newWidth - glowWidth) > 0.5f) {
+            glowWidth = newWidth;
+        }
     }
 
     /** 由 animator 每帧写入最新角点坐标 */
@@ -74,6 +90,11 @@ public class CaretTrailPanel extends JComponent {
     /** 清除绘制数据（光标不可见时调用） */
     public void clearCorners() {
         hasData = false;
+    }
+
+    /** 当前辉光外扩量，供调用方计算重绘区域余量 */
+    public float getGlowWidth() {
+        return glowWidth;
     }
 
     /**
@@ -100,7 +121,7 @@ public class CaretTrailPanel extends JComponent {
 
             drawGlow(g2, polygon);
 
-            // 主体实心填充
+            // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
             g2.setColor(fillColor);
             g2.fillPolygon(polygon);
 
@@ -112,23 +133,24 @@ public class CaretTrailPanel extends JComponent {
     /**
      * 绘制辉光。
      *
-     * <p>Swing 没有 Canvas 的 {@code shadowBlur}，这里用<b>多层递减宽度的半透明描边</b>
-     * 叠加来逼近高斯光晕：外层宽而极淡、内层窄而浓。
+     * <p>Canvas 的 {@code shadowBlur} 是真正的高斯模糊，Swing 没有等价物。
+     * 这里用 <b>多层递减宽度的半透明描边</b> 逼近：外层宽而极淡、内层窄而浓，
+     * 叠加后形成由内向外的连续衰减。
      *
-     * <p>两个关键参数决定观感：
-     * <ul>
-     *   <li><b>层数</b>：太少会露出可见的硬边，看起来像给光标套了个壳（10 层足够平滑）</li>
-     *   <li><b>衰减曲线</b>：线性衰减在边缘会有"台阶感"，改用<b>平方衰减</b>过渡自然得多</li>
-     * </ul>
+     * <p><b>为什么用描边而不是填充膨胀轮廓</b>：
+     * 填充会把膨胀后的实心块叠加起来，结果是「光标被撑大了一圈、糊成一团」，
+     * 而不是边缘发光。描边是居中绘制，一半压在主体内部（被填充覆盖），
+     * 只有一半露在外面 —— 既保持光标原尺寸，又得到边缘光晕。
      */
     private void drawGlow(Graphics2D g2, Polygon polygon) {
-        if (!config.useShadow || config.glowLayers <= 0 || glowWidth <= 0) {
+        if (!config.useShadow || config.glowLayers <= 0 || glowWidth <= 0.5f) {
             return;
         }
 
         int red = glowColor.getRed();
         int green = glowColor.getGreen();
         int blue = glowColor.getBlue();
+        float colorAlpha = glowColor.getAlpha() / 255f;
 
         int layers = config.glowLayers;
         for (int i = layers; i >= 1; i--) {
@@ -136,18 +158,18 @@ public class CaretTrailPanel extends JComponent {
             float t = (float) i / layers;
             float strokeWidth = Math.max(1f, glowWidth * t);
 
-            // 平方衰减：外层接近透明，内层逐渐变浓，过渡无明显台阶
+            // 平方衰减：外层极淡、内层渐浓，过渡自然无台阶
             float falloff = 1f - t * 0.85f;
-            float alphaFactor = config.glowOpacity * falloff * falloff;
+            float alpha = config.glowOpacity * falloff * falloff * colorAlpha;
 
-            int alpha = Math.round(Math.max(0f, Math.min(1f, alphaFactor)) * 255);
-            if (alpha < 3) {
+            int argb = Math.round(Math.max(0f, Math.min(1f, alpha)) * 255);
+            if (argb < 3) {
                 continue;
             }
 
             g2.setStroke(new BasicStroke(strokeWidth,
                     BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g2.setColor(new Color(red, green, blue, alpha));
+            g2.setColor(new Color(red, green, blue, argb));
             g2.drawPolygon(polygon);
         }
     }

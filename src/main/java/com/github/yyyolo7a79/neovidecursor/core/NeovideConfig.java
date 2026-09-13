@@ -26,19 +26,19 @@ public class NeovideConfig {
     public float shadowBlurFactor = 0.6f;
 
     /**
-     * 辉光宽度系数：实际宽度 = 该系数 × 24 像素。
-     * 配合多层平方衰减绘制，可得到接近 Canvas shadowBlur 的柔和光晕。
+     * 辉光实际半径由 {@link #shadowBlurFactor} 决定
+     * （= shadowBlurFactor × 光标较长边），与原版 Canvas {@code shadowBlur} 语义一致。
+     * 对典型 IntelliJ 光标（2×32）约为 19px。
      */
-    public float glowWidthFactor = 0.35f;
 
     /**
      * 辉光层数：层数越多渐变越平滑。
      * 层数太少会露出"硬边"，看起来像给光标套了个壳。
      */
-    public int glowLayers = 10;
+    public int glowLayers = 12;
 
-    /** 辉光基础不透明度 */
-    public float glowOpacity = 0.5f;
+    /** 辉光基础不透明度（只影响光晕，不影响光标主体） */
+    public float glowOpacity = 0.55f;
 
     /** 光标停止移动后，延迟多久淡出（毫秒） */
     public int cursorDisappearDelay = 50;

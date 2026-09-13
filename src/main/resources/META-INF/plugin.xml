@@ -24,5 +24,12 @@
                 description="启用或禁用拖尾光标效果；关闭时会恢复原生光标">
             <add-to-group group-id="ToolsMenu" anchor="first"/>
         </action>
+
+        <action id="NeovideCursor.PaintDiag"
+                class="com.github.yyyolo7a79.neovidecursor.ui.TogglePaintDiagAction"
+                text="Neovide 光标：性能诊断（禁用重绘）"
+                description="跳过重绘只跑计算，用于分离瓶颈：是绘制慢还是 EDT 调度慢">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

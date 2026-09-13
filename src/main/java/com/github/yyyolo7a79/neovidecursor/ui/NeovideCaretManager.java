@@ -1,6 +1,7 @@
 package com.github.yyyolo7a79.neovidecursor.ui;
 
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.EditorKind;
@@ -46,6 +47,35 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
     /** 是否已为「插件加载时已存在的编辑器」补建过动画 */
     private static volatile boolean initialScanDone = false;
+
+    /**
+     * 性能诊断开关：置位后跳过全部覆盖层重绘，只保留物理计算与帧率统计。
+     *
+     * <p>用途是<b>分离瓶颈</b>：
+     * <ul>
+     *   <li>开启后 fps 大幅上升 → 瓶颈在重绘（值得改造成独立窗口方案）</li>
+     *   <li>开启后 fps 依然很低 → 瓶颈在 EDT 调度/负载，改窗口方案也没用</li>
+     * </ul>
+     */
+    private static volatile boolean paintDisabled = false;
+
+    private static final Logger LOG = Logger.getInstance(NeovideCaretManager.class);
+
+    public static boolean isPaintDisabled() {
+        return paintDisabled;
+    }
+
+    public static void setPaintDisabled(boolean disabled) {
+        paintDisabled = disabled;
+        // 打入日志便于事后按时间点对比两种模式下的 fps 数据
+        LOG.info("neovide-cursor: 性能诊断模式 " + (disabled ? "已开启（跳过重绘）" : "已关闭"));
+        if (disabled) {
+            // 关闭重绘前先清一次屏，否则残影会一直留在编辑器上
+            for (CaretAnimator animator : ANIMATORS.values()) {
+                animator.clearTrail();
+            }
+        }
+    }
 
     public static NeovideConfig getConfig() {
         return CONFIG;

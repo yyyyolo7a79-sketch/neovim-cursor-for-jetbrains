@@ -12,6 +12,8 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
+import java.awt.Component;
+import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -62,6 +64,12 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 静止时的轮询间隔（低频看门狗） */
     private static final int IDLE_DELAY_MS = 120;
 
+    /** 失焦且静止时的轮询间隔：编辑器没有焦点时光标不会动，无需高响应度 */
+    private static final int IDLE_UNFOCUSED_DELAY_MS = 600;
+
+    /** 自适应调度的间隔上限（毫秒） */
+    private static final int MAX_ADAPTIVE_DELAY_MS = 40;
+
     /** 单帧最大时间步长，防止 IDE 卡顿后弹簧"跳变" */
     private static final double MAX_DT = 1.0 / 30;
 
@@ -79,8 +87,8 @@ public class CaretAnimator implements Disposable, CaretListener {
     private final NeovideConfig config;
     private final TrailCorner[] corners;
 
-    /** 辉光最大外扩量，用于计算重绘区域需要留出的余量 */
-    private final int glowPadding;
+    /** 辉光最大外扩量，用于计算重绘区域需要留出的余量（随光标尺寸动态更新） */
+    private int glowPadding;
 
     // ===== 渲染调度 =====
 
@@ -111,6 +119,20 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 上一次 tick 的时间戳（纳秒） */
     private long lastNanos;
+
+    /** 上一次 tick 的绝对时刻，用于测量真实帧间隔 */
+    private long lastTickNanos = 0L;
+
+    /** 实测帧间隔的平滑值（毫秒），供自适应调度使用 */
+    private double smoothedIntervalMs = ACTIVE_DELAY_MS;
+
+    /**
+     * 平滑后的帧间隔（秒），用于低帧率下的动画补偿。
+     *
+     * <p>低帧率时瞬时 dt 波动很大（15~40fps 意味着 0.025~0.067s），
+     * 若直接用它计算动画时长，弹簧的时间常数会每帧跳变，运动就不连续了。
+     */
+    private double smoothedDt = 1.0 / 60.0;
 
     /**
      * 上次记录的视觉位置，用于低成本地判断光标是否移动。
@@ -153,9 +175,10 @@ public class CaretAnimator implements Disposable, CaretListener {
             corners[i] = new TrailCorner(CORNER_RELATIVE[i][0], CORNER_RELATIVE[i][1], config);
         }
 
-        // 重绘区域要覆盖辉光的外扩部分，否则光晕边缘会残留脏像素
-        float glowWidth = Math.max(3f, config.glowWidthFactor * 24f);
-        this.glowPadding = (int) Math.ceil(glowWidth) + 3;
+        // 重绘区域必须覆盖辉光的外扩部分，否则光晕边缘会残留脏像素。
+        // 辉光半径 = shadowBlurFactor × 光标较长边，这里先用典型行高 32 估算，
+        // 之后 refreshTarget 拿到真实光标尺寸时会修正。
+        this.glowPadding = (int) Math.ceil(Math.max(3f, config.shadowBlurFactor * 32f)) + 4;
 
         // 面板覆盖整个内容区（拖尾可能延伸到光标之外）
         panel.setBounds(0, 0, Math.max(content.getWidth(), 1), Math.max(content.getHeight(), 1));
@@ -237,6 +260,15 @@ public class CaretAnimator implements Disposable, CaretListener {
         double dt = Math.min((now - lastNanos) / 1_000_000_000.0, MAX_DT);
         lastNanos = now;
 
+        // 测量真实帧间隔（指数平滑）。变快时快速跟随、变慢时缓慢跟随，
+        // 避免偶发的一次卡顿把调度频率长期压低。
+        if (lastTickNanos != 0L) {
+            double actualMs = (now - lastTickNanos) / 1_000_000.0;
+            double weight = actualMs < smoothedIntervalMs ? 0.4 : 0.1;
+            smoothedIntervalMs += (actualMs - smoothedIntervalMs) * weight;
+        }
+        lastTickNanos = now;
+
         boolean moved = refreshTarget();
 
         if (!initialized) {
@@ -259,8 +291,17 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         // 目标点刚变化：按运动方向重新分配四个角点的滞后名次
+        // 平滑帧间隔：低帧率下 dt 波动大，直接用于计算动画时长会让弹簧的
+        // 时间常数每帧跳变、运动不连续。
+        //
+        // 但必须取「平滑值」与「瞬时值」的较大者：平滑需要好几帧才收敛，
+        // 而动画本身可能就只有 4~6 帧 —— 若直接用平滑值，
+        // 开头几帧的补偿会严重不足，动画照样被 dt 吃掉（实测帧数反而更少）。
+        smoothedDt += (dt - smoothedDt) * 0.25;
+        double effectiveDt = Math.max(dt, smoothedDt);
+
         if (jumped) {
-            assignRanks();
+            assignRanks(effectiveDt);
             jumped = false;
         }
 
@@ -280,10 +321,41 @@ public class CaretAnimator implements Disposable, CaretListener {
             repaintTrail();
         }
 
-        // 动态帧率：有运动则保持高帧率，静止后降频轮询
-        currentDelayMs = (moved || anyAnimating) ? ACTIVE_DELAY_MS : IDLE_DELAY_MS;
+        currentDelayMs = computeNextDelay(moved || anyAnimating);
 
         recordFrameStats(now, moved || anyAnimating);
+    }
+
+    /**
+     * 计算下一次调度间隔。
+     *
+     * <p>三项策略叠加：
+     * <ol>
+     *   <li><b>自适应</b>：AWT 的 EventQueue 中，原生输入事件（键盘/鼠标）的优先级
+     *       高于 {@code invokeLater} 提交的任务 —— 编辑器繁忙时我们的渲染任务会被排到后面，
+     *       实测帧间隔远大于设定的 8ms。此时若继续按 8ms 提交，绝大多数任务会因
+     *       framePending 被直接丢弃，纯粹浪费 EDT 时间。改为跟随实测间隔，减少无效提交。</li>
+     *   <li><b>失焦降频</b>：编辑器没有焦点时光标不会移动，无需高响应度。</li>
+     *   <li><b>静止降频</b>：完全没有动画时只做低频看门狗轮询。</li>
+     * </ol>
+     */
+    private int computeNextDelay(boolean active) {
+        if (active) {
+            int adaptive = (int) Math.round(smoothedIntervalMs * 0.85);
+            return Math.max(ACTIVE_DELAY_MS, Math.min(adaptive, MAX_ADAPTIVE_DELAY_MS));
+        }
+        return isEditorFocused() ? IDLE_DELAY_MS : IDLE_UNFOCUSED_DELAY_MS;
+    }
+
+    /** 编辑器当前是否持有键盘焦点 */
+    private boolean isEditorFocused() {
+        try {
+            Component owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+            return owner != null && SwingUtilities.isDescendingFrom(owner, content);
+        } catch (Throwable t) {
+            // 判断失败时按「有焦点」处理，确保功能不因此丢失
+            return true;
+        }
     }
 
     /**
@@ -331,6 +403,13 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 两点相距很远，合并后的矩形会覆盖大半个编辑器，直接把优化抵消掉。
      */
     private void repaintTrail() {
+        // 性能诊断模式：跳过全部重绘，只跑物理计算。
+        // 用于分离瓶颈 —— 若跳过重绘后 fps 立刻升高，说明瓶颈在绘制；
+        // 若 fps 仍低，说明瓶颈在 EDT 调度/负载，换窗口方案也无济于事。
+        if (NeovideCaretManager.isPaintDisabled()) {
+            return;
+        }
+
         computeTrailBounds(currentBounds);
 
         // 上一帧的位置：必须重绘才能擦除残影
@@ -432,6 +511,10 @@ public class CaretAnimator implements Disposable, CaretListener {
             centerX = newCenterX;
             centerY = newCenterY;
 
+            // 辉光半径与重绘余量随光标尺寸同步更新
+            panel.updateGlowRadius(width, height);
+            glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
+
             if (!initialized) {
                 // 首次定位：四个角直接吸附到位，避免从 (0,0) 飞入
                 for (TrailCorner corner : corners) {
@@ -457,7 +540,7 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 它在 {@link TrailCorner#jump} 中拿到的滞后系数越大 —— 于是前缘紧跟、
      * 后缘拖沓，矩形被拉长成拖尾形状。
      */
-    private void assignRanks() {
+    private void assignRanks(double dt) {
         double[] alignment = new double[corners.length];
         for (int i = 0; i < corners.length; i++) {
             alignment[i] = corners[i].calculateDirectionAlignment(
@@ -477,7 +560,17 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         for (int i = 0; i < corners.length; i++) {
-            corners[i].jump(cursorWidth, cursorHeight, centerX, centerY, ranks[i]);
+            corners[i].jump(cursorWidth, cursorHeight, centerX, centerY, ranks[i], dt);
+        }
+    }
+
+    /** 清除已绘制的拖尾并刷新一次（切到诊断模式时调用） */
+    public void clearTrail() {
+        panel.clearCorners();
+        try {
+            content.repaint();
+        } catch (Throwable ignored) {
+            // 忽略
         }
     }
 
