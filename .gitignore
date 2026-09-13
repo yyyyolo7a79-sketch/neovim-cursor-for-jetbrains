@@ -15,4 +15,6 @@ image*.png
 # ===== 其他 =====
 *.log
 
+# ===== 内部资料（含本机路径等个人信息，不公开）=====
 需求/
+jetbrains-neovide-cursor-prompt.md
