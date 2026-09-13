@@ -360,4 +360,12 @@ fps=0.4
 
 ## License
 
-尚未指定。如需开源分发，建议补充（原作者 VS Code 版为 Apache-2.0）。
+[MIT](LICENSE)
+
+### 关于算法来源
+
+本项目的拖尾算法（`DampedSpring`、`TrailCorner`）逐行移植自 VS Code 版
+`neovide-cursor`。原项目未附带明确的许可证文件，其作者曾公开表示
+"只要符合开源协议大家可以随意做更多修改和分发"。
+
+若原作者对授权方式有异议，请提 Issue 联系调整。
