@@ -22,22 +22,34 @@ public class NeovideConfig {
     /** 辉光颜色（HEX 格式） */
     public String shadowColor = "#FFC0CB";
 
-    /** 辉光强度系数：实际模糊半径 = 该系数 × 光标较长边 */
-    public float shadowBlurFactor = 0.6f;
-
     /**
-     * 辉光实际半径由 {@link #shadowBlurFactor} 决定
-     * （= shadowBlurFactor × 光标较长边），与原版 Canvas {@code shadowBlur} 语义一致。
-     * 对典型 IntelliJ 光标（2×32）约为 19px。
+     * 辉光大小系数：实际外扩半径 = 该系数 × 光标较长边。
+     *
+     * <p><b>本项偏离了原版 JS 的 0.6，这是有意为之。</b>
+     * 原版 {@code cursorConfig.shadowBlurFactor = 0.6} 描述的是 Canvas
+     * {@code shadowBlur}（高斯模糊的<i>直径</i>）—— 模糊会把能量摊开，
+     * 图形越窄、峰值被稀释得越厉害。VS Code 的光标有 8px 宽，尚能撑住；
+     * 而 IntelliJ 光标只有 2px 宽，同一数值直接当作膨胀半径使用时，
+     * 会得到一团宽约 40px 的椭圆雾（是光标宽度的 20 倍），远谈不上"贴着光标发光"。
+     *
+     * <p>0.2 是按"光晕总宽与残影模式观感一致"（约 14px）反推得到的。
+     * 想还原原版那种夸张的大范围光雾，把它调回 0.6 即可。
      */
+    public float shadowBlurFactor = 0.2f;
 
     /**
      * 辉光层数：层数越多渐变越平滑。
      * 层数太少会露出"硬边"，看起来像给光标套了个壳。
+     *
+     * <p><b>层数不影响光晕整体亮度</b> —— 每层的独立不透明度会按层数反解，
+     * 保证叠加后峰值恒等于 {@link #glowOpacity}。加层只是让过渡更细腻。
      */
     public int glowLayers = 12;
 
-    /** 辉光基础不透明度（只影响光晕，不影响光标主体） */
+    /**
+     * 辉光峰值不透明度（只影响光晕，不影响光标主体）。
+     * 即紧贴光标处光晕的最终不透明度，向外的衰减均以此为基准。
+     */
     public float glowOpacity = 0.55f;
 
     /** 光标停止移动后，延迟多久淡出（毫秒） */
@@ -77,13 +89,17 @@ public class NeovideConfig {
     /**
      * 拖尾最大位移系数：单个角点相对目标的最大偏移 = 该系数 × 光标较长边。
      *
-     * <p>实测经验：原版 JS 取值 60（约 1920px），在 Canvas 全屏重绘下没问题，
-     * 但 Swing 里覆盖层必须局部重绘 —— 拖尾越长，需要重绘的包围盒越大，
-     * 跨行跳转时会直接退化成接近全屏的重绘并明显掉帧。
-     * 收紧到 4（约 128px）后，正常移动的拖尾长度完全不受影响，
-     * 只有极端跳转才会被截断。
+     * <p>本项已与原版 JS <b>严格对齐</b>（60，约 1920px）。
+     *
+     * <p><b>注意这是一项性能取舍</b>：该系数只做「限幅」，对相邻行等常规移动
+     * <b>完全无影响</b>（偏移量远达不到阈值）；它只在跨多行跳转时起作用 ——
+     * 值越大，拖尾越完整、越接近原版观感，但 Swing 覆盖层必须局部重绘，
+     * 偏移越大重绘包围盒越大，跨十行以上跳转时可能退化成接近全屏的重绘。
+     *
+     * <p>若跳转时明显掉帧，把本值调小即可（曾用过 4 = 约 128px，
+     * 代价是跨行拖尾会被截断，正常移动观感不受影响）。
      */
-    public float maxTrailDistanceFactor = 4f;
+    public float maxTrailDistanceFactor = 60f;
 
     /** 硬吸附时的动画时长（秒） */
     public float snapAnimationLength = 0.02f;

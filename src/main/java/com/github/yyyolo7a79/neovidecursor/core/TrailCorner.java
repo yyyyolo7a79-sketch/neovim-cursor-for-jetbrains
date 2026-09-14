@@ -229,4 +229,15 @@ public class TrailCorner {
     public double getCurrentY() {
         return currentY;
     }
+
+    /**
+     * 当前角点相对目标的偏移量（像素）——即拖尾的"展开程度"。
+     *
+     * <p>完全静止时四角归位，偏移为 0；只要光标在动，偏移至少是一个字符宽或一行高。
+     * 绘制辉光时据此淡入淡出：辉光是"运动中的光标"才有的效果，
+     * 静止的光标不该顶着一圈光。
+     */
+    public double getOffsetMagnitude() {
+        return Math.hypot(springX.getPosition(), springY.getPosition());
+    }
 }

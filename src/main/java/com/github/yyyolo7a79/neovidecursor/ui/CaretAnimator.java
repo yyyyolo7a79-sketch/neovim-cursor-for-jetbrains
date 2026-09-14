@@ -76,6 +76,20 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 单帧最大时间步长，防止 IDE 卡顿后弹簧"跳变" */
     private static final double MAX_DT = 1.0 / 30;
 
+    /**
+     * 辉光淡入淡出的偏移量区间（像素）。
+     *
+     * <p>辉光强度由四角相对目标的最大偏移量（即拖尾展开程度）驱动：
+     * 偏移 ≤ {@link #GLOW_FADE_START} 视为静止，不画光晕；
+     * 偏移 ≥ {@link #GLOW_FADE_END} 为满强度。
+     *
+     * <p>区间只有 2px 宽，因为这两个状态本来就离得很近：静止时偏移为 0，
+     * 而任何真实移动的偏移至少是一个字符宽（约 8px）或一行高（约 32px）。
+     * 窄区间既保证移动时光晕"完全没被动过"，又让停下时的熄灭不突兀。
+     */
+    private static final double GLOW_FADE_START = 0.5;
+    private static final double GLOW_FADE_END = 2.5;
+
     /** 四个角点的相对位置（左上 → 右上 → 右下 → 左下，顺时针） */
     private static final double[][] CORNER_RELATIVE = {
             {-0.5, -0.5},
@@ -511,11 +525,21 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         boolean anyAnimating = false;
+        double maxOffset = 0;
         for (TrailCorner corner : corners) {
             if (corner.update(cursorWidth, cursorHeight, centerX, centerY, dt, false)) {
                 anyAnimating = true;
             }
+            double offset = corner.getOffsetMagnitude();
+            if (offset > maxOffset) {
+                maxOffset = offset;
+            }
         }
+
+        // 辉光只在拖尾展开时点亮 —— 静止的光标顶着一圈光晕并不好看，
+        // 那是"运动中"才该有的效果。强度由最大偏移量映射，边界见 GLOW_FADE_*。
+        panel.setGlowStrength((float) ((maxOffset - GLOW_FADE_START)
+                / (GLOW_FADE_END - GLOW_FADE_START)));
 
         panel.updateCorners(
                 corners[0].getCurrentX(), corners[0].getCurrentY(),

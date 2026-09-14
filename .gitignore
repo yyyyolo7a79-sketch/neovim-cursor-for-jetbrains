@@ -2,9 +2,11 @@
 build/
 .gradle/
 .intellijPlatform/
+*.class
 
 # ===== IDE 配置 =====
 .idea/
+.vscode/
 *.iml
 *.ipr
 *.iws
