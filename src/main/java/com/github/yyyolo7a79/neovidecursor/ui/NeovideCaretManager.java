@@ -4,7 +4,6 @@ import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
-import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
@@ -13,6 +12,7 @@ import com.intellij.openapi.editor.event.EditorFactoryListener;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.Color;
+import java.awt.Component;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -112,25 +112,72 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 return;
             }
 
-            // 跳过控制台、日志窗口等非项目编辑器
+            // 跳过没有归属项目的编辑器（如部分全局日志窗口）：
+            // 这类编辑器不是用户会去交互的地方，挂覆盖层反而可能出问题
             if (editor.getProject() == null) {
                 return;
             }
 
-            // 跳过终端/控制台编辑器：
-            // 它们的光标由终端模拟器自行绘制（不受 CARET_COLOR 控制），
-            // caret 模型也与代码编辑器不同 —— 挂上去只会多出一个不跟随的假光标。
-            if (editor.getEditorKind() == EditorKind.CONSOLE) {
+            // 跳过终端：它的光标由终端模拟器自行绘制、不受 CARET_COLOR 控制，
+            // 全局隐藏对它无效 —— 补画反而会变成双光标。详见 isTerminalEditor。
+            if (isTerminalEditor(editor)) {
                 return;
             }
 
-            // 第一次挂载时隐藏原生光标
+            // 【不要跳过控制台编辑器】
+            //
+            // 曾经的写法是 `if (getEditorKind() == CONSOLE) return;`，
+            // 理由是"挂上去只会多出一个不跟随的假光标"。这个判断只看到了一半：
+            // 隐藏原生光标改的是【全局】配色方案，跳过控制台不等于放过控制台 ——
+            // 它们照样被隐藏了，却没有替代品，于是 Build / Run / Services / Problems
+            // 等输出区光标全部消失。
+            //
+            // 正确做法是照常挂载，由 CaretAnimator 以「静态光标」模式处理：
+            // 只补画一个静止的光标，不做拖尾。
+            //
+            // 注：终端（Terminal 工具窗口）的光标由终端模拟器自己绘制，不受
+            // CARET_COLOR 影响，因此不在此列，也无需特殊处理。
             applyNativeCaretHidden();
 
             ANIMATORS.computeIfAbsent(editor, e -> new CaretAnimator(e, CONFIG));
         } catch (Throwable t) {
             // 单个编辑器挂载失败不应影响其他编辑器
         }
+    }
+
+    /**
+     * 判断编辑器是否属于终端（Terminal 工具窗口）。
+     *
+     * <p><b>为什么必须区分</b>：终端背后的 editor 与输出控制台<b>在类型上完全一样</b> ——
+     * {@code TerminalEditorFactory.createOutputEditor()} 返回的就是标准
+     * {@code EditorImpl}，两者的 {@code EditorKind} 也都是 {@code CONSOLE}，
+     * 因此只能靠<b>组件树</b>识别（沿内容组件向上找终端特有的类）。
+     *
+     * <p><b>为什么不能接管终端</b>：终端的光标由终端模拟器自行绘制，
+     * <b>不受 {@code CARET_COLOR} 控制</b> —— 全局隐藏对它无效。若照常补画光标，
+     * 结果就是双光标，且我们读到的 caret 位置与终端实际光标并不同步（实测差一个字符）。
+     *
+     * <p>本方法刻意依赖<b>包名前缀</b>而非具体类名：终端在近几个版本换过实现
+     * （{@code org.jetbrains.plugins.terminal} → {@code com.intellij.terminal.frontend}），
+     * 但包名始终稳定。
+     */
+    private static boolean isTerminalEditor(Editor editor) {
+        try {
+            Component c = editor.getContentComponent();
+            for (int depth = 0; c != null && depth < 16; depth++) {
+                String name = c.getClass().getName();
+                if (name.startsWith("com.intellij.terminal")
+                        || name.startsWith("org.jetbrains.plugins.terminal")
+                        || name.contains("JediTerm")) {
+                    LOG.info("neovide-cursor: 判定为终端编辑器，跳过 — " + name);
+                    return true;
+                }
+                c = c.getParent();
+            }
+        } catch (Throwable ignored) {
+            // 组件树不可用时就按「非终端」处理：宁可多画一个光标，也不要漏掉输出区
+        }
+        return false;
     }
 
     @Override

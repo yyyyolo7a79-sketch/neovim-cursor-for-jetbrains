@@ -4,6 +4,9 @@ build/
 .intellijPlatform/
 *.class
 
+# IDEA 直接编译（不走 Gradle）时的输出目录
+bin/
+
 # ===== IDE 配置 =====
 .idea/
 .vscode/

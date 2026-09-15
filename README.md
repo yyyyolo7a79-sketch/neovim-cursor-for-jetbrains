@@ -233,16 +233,24 @@ A = 1 - (1 - peak)^(1/N)
 
 ### 5. 隐藏原生光标
 
-IntelliJ **没有**隐藏光标的公开 API（已实测：`CaretModel` 上不存在 `setCaretsVisible` 之类的方法）。
+IntelliJ **没有**隐藏光标的公开 API —— `Editor` / `CaretModel` / `Caret` 三个接口
+均已用 `javap` 反编译确认（`Editor` 只提供 `getColorsScheme()`，没有 setter，
+因此也不存在"只隐藏某一个编辑器"的做法）。
 
-唯一可行路径是改配色方案：
+唯一可行路径是改**全局配色方案**：
 
 ```java
 EditorColorsManager.getInstance().getGlobalScheme()
         .setColor(EditorColors.CARET_COLOR, new Color(0, 0, 0, 0));
 ```
 
-**关键**：`setColor` 只改内存对象、**不写入配置文件**，所以即使插件异常退出，重启 IDE 即自动复原 —— 风险可控。
+⚠️ **这个操作是全局的，代价必须自己兜住**：一旦隐藏，IDE 内**所有**编辑器的原生光标
+都会消失 —— 包括那些我们并不打算接管的（Build / Run / Services 等输出区）。
+**凡是被隐藏的，都必须由我们补画一个替代光标**，否则那些位置的光标会彻底消失。
+详见踩坑 #8。
+
+**另一个关键点**：`setColor` 只改内存对象、**不写入配置文件**，所以即使插件异常退出、
+颜色没来得及恢复，重启 IDE 即自动复原 —— 风险是可控的。
 
 ### 6. 高精度调度：不要用 `javax.swing.Timer`
 
@@ -327,11 +335,50 @@ position = (a + b * dt) * c;    // b 里已含"速度带来的位移"
 
 **分开提交两次 `repaint`。**
 
-### #8 过滤控制台/终端编辑器
+### #8 控制台编辑器：不能一概过滤，也不能一概接管
 
-终端的光标由**终端模拟器自己绘制**（不受 `CARET_COLOR` 控制），caret 模型也与代码编辑器完全不同。
+这一条前后错了两次，记录完整结论。
 
-挂上去只会多出一个不跟随的假光标。**用 `EditorKind.CONSOLE` 过滤掉。**
+**第一次的错**：用 `EditorKind.CONSOLE` 一概过滤掉，理由是"终端光标自带，
+挂上去只会多一个不跟随的假光标"。**这个理由对终端成立，对输出控制台却不成立** ——
+Build / Run / Services / Problems 的输出区同样是 `CONSOLE`，
+但它们的光标**恰恰是被 `CARET_COLOR` 控制的**。全局隐藏 + 一概过滤
+= 这些位置的光标全部消失。
+
+**第二次的错**：既然不能过滤，那就给所有 `CONSOLE` 补画光标。
+结果**终端变成了双光标** —— 终端自己的光标本来就没被隐藏，我们多画了一个，
+而且位置还不同步（我们读 Editor 的 caret，终端实际光标由模拟器维护，实测差一个字符）。
+
+**正确做法：两类分开处理。**
+
+| 编辑器 | 光标来源 | 处理方式 |
+|---|---|---|
+| 代码编辑器（`MAIN_EDITOR`） | `CARET_COLOR` | 隐藏 + 拖尾 |
+| 输出控制台（`CONSOLE`） | `CARET_COLOR` | **补画静态光标**（不做拖尾） |
+| 终端（`CONSOLE`） | 终端模拟器自绘 | **跳过**，什么都不做 |
+
+**难点在于后两者类型完全相同**：`TerminalEditorFactory.createOutputEditor()`
+返回的就是标准 `EditorImpl`，两者的 `EditorKind` 也都是 `CONSOLE`，靠类型无法区分。
+最终改为**沿组件树向上遍历**，命中 terminal 包名即判定为终端：
+
+```java
+Component c = editor.getContentComponent();
+while (c != null) {
+    String name = c.getClass().getName();
+    if (name.startsWith("com.intellij.terminal")
+            || name.startsWith("org.jetbrains.plugins.terminal")) {
+        return true;   // 终端，跳过
+    }
+    c = c.getParent();
+}
+```
+
+用**包名前缀**而非具体类名，是因为终端在近几个版本换过实现
+（`org.jetbrains.plugins.terminal` → `com.intellij.terminal.frontend`），包名却始终稳定。
+
+> **教训**：当某个操作带**全局副作用**时，"跳过某类对象"和"放过某类对象"
+> 是两件完全不同的事。过滤条件必须回到副作用的**实际作用域**去核对，
+> 而不能只看"这类对象自己需不需要被处理"。
 
 ### #9 残影必须补插值点，否则只是"光标在跳"
 
@@ -487,6 +534,7 @@ fps=0.4
 - [x] **残影轨迹模型** —— 已实现，可通过 `Tools` 菜单与弹簧模型切换
 - [x] **辉光** —— 已实现，随拖尾展开亮起、静止时熄灭（踩坑 #12~#16）
 - [x] **放宽版本兼容** —— 已支持 2024.2 ~ 2026.2+，详见[兼容性](#兼容性)
+- [x] **控制台与终端分类处理** —— 输出区补画静态光标、终端跳过（踩坑 #8）
 - [ ] **配置界面**：`Settings | Editor | Neovide Cursor`，免改代码调参
 - [ ] **支持 2023 及更早**：需将编译目标降到 Java 17 / 11
 - [ ] **终端支持**：需要单独适配终端的 caret 模型，并解决其原生方块光标

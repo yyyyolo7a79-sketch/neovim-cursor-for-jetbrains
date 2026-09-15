@@ -6,6 +6,7 @@ import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
@@ -104,6 +105,20 @@ public class CaretAnimator implements Disposable, CaretListener {
     private final NeovideConfig config;
     private final TrailCorner[] corners;
 
+    /**
+     * 是否为「静态光标」模式 —— 用于控制台类编辑器（{@link EditorKind#CONSOLE}）。
+     *
+     * <p><b>为什么必须处理它们</b>：原生光标是通过全局配色方案
+     * （把 {@code CARET_COLOR} 置为全透明）隐藏的，而这个操作<b>无法按编辑器区分</b> ——
+     * {@code Editor} / {@code CaretModel} / {@code Caret} 三个接口均已确认不存在
+     * per-editor 的光标隐藏 API。因此 Build / Run / Services / Problems 等工具窗口的
+     * 输出区一旦被全局隐藏，若不补画光标，<b>那些位置的光标就会彻底消失</b>。
+     *
+     * <p>这类编辑器只需要一个静止的光标，不需要拖尾，因此走静态分支：
+     * 每帧把四角直接吸附到目标位置（等价于画一个矩形），且不绘制辉光。
+     */
+    private final boolean staticCaret;
+
     // ===== 残影模型（trailMode = AFTERIMAGE 时使用）=====
 
     private final AfterimageTrail afterimageTrail;
@@ -193,6 +208,10 @@ public class CaretAnimator implements Disposable, CaretListener {
         this.config = config;
         this.content = editor.getContentComponent();
         this.panel = new CaretTrailPanel(config);
+
+        // 控制台类编辑器（Build / Run / Services / Problems 的输出区）只补画静止光标，
+        // 不做拖尾 —— 它们的光标被全局隐藏了，必须有人补上，原因见 staticCaret 字段说明。
+        this.staticCaret = editor.getEditorKind() == EditorKind.CONSOLE;
 
         this.corners = new TrailCorner[CORNER_RELATIVE.length];
         for (int i = 0; i < CORNER_RELATIVE.length; i++) {
@@ -327,9 +346,15 @@ public class CaretAnimator implements Disposable, CaretListener {
         smoothedDt += (dt - smoothedDt) * 0.25;
         double effectiveDt = Math.max(dt, smoothedDt);
 
-        boolean anyAnimating = (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE)
-                ? tickAfterimage(now, moved)
-                : tickSpring(dt, effectiveDt);
+        boolean anyAnimating;
+        if (staticCaret) {
+            // 控制台编辑器：只补画静止光标，不参与拖尾
+            anyAnimating = tickStaticCaret();
+        } else if (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE) {
+            anyAnimating = tickAfterimage(now, moved);
+        } else {
+            anyAnimating = tickSpring(dt, effectiveDt);
+        }
 
         currentDelayMs = computeNextDelay(moved || anyAnimating);
 
@@ -516,6 +541,34 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     // ==================== 两种渲染模式 ====================
+
+    /**
+     * 静态光标模式的一帧：把四角直接吸附到目标位置，不产生任何拖尾。
+     *
+     * <p>仅用于控制台类编辑器（Build / Run / Services / Problems 等输出区）——
+     * 它们的光标被全局隐藏了，必须有人补画，详见 {@link #staticCaret}。
+     *
+     * <p>返回值恒为 false，让调度器保持在空闲频率：控制台光标不需要高帧率，
+     * 仅在 caret 事件唤醒时才会短暂提速。
+     */
+    private boolean tickStaticCaret() {
+        for (TrailCorner corner : corners) {
+            corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
+        }
+
+        // 不绘制辉光：控制台不需要，也省掉这部分重绘开销
+        panel.setGlowStrength(0f);
+
+        panel.updateCorners(
+                corners[0].getCurrentX(), corners[0].getCurrentY(),
+                corners[1].getCurrentX(), corners[1].getCurrentY(),
+                corners[2].getCurrentX(), corners[2].getCurrentY(),
+                corners[3].getCurrentX(), corners[3].getCurrentY());
+
+        computeTrailBounds(currentBounds);
+        submitRepaint();
+        return false;
+    }
 
     /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
     private boolean tickSpring(double dt, double effectiveDt) {
