@@ -36,9 +36,21 @@ intellijPlatform {
         version = providers.gradleProperty("pluginVersion")
 
         ideaVersion {
-            // 252 = 2025.2 系列
-            sinceBuild.set("252")
-            untilBuild.set("252.*")
+            // 242 = 2024.2 系列。
+            //
+            // 下限之所以卡在 242 而不是更低：2024.2 是平台改用 JBR 21 的起点，
+            // 与本项目的编译目标（Java 21）一致。2024.1 及更早跑在 JBR 17 上，
+            // 加载 Java 21 字节码会直接抛 UnsupportedClassVersionError 崩溃。
+            sinceBuild.set("242")
+
+            // 【刻意不设置 untilBuild】
+            //
+            // 本插件只依赖平台核心 API（Editor / CaretListener / EditorColors 等），
+            // 不含任何版本特定代码，因此对后续版本天然兼容。
+            //
+            // JetBrains 官方建议：这种情况应留空 untilBuild，表示兼容所有后续版本。
+            // 写死上限（如曾经的 "252.*"）会导致每次 IDE 升级插件都被判为"不兼容"，
+            // 用户只能等新版本发布 —— 这正是本插件先前只能在 2025.2 上使用的原因。
         }
     }
 
