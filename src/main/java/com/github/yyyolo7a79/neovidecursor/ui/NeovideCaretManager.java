@@ -29,8 +29,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p><b>关于隐藏原生光标的影响范围</b>：修改的是全局配色方案的 {@code CARET_COLOR}，
  * 因而影响本 IDE 进程内的所有编辑器。这是与 VS Code 版一致的做法（那边也是全局注入 CSS）。
  *
- * <p><b>重要的是</b>：{@code setColor} 只改内存中的配色对象、<b>不会写入配置文件</b>。
- * 因此即使插件异常退出、颜色没来得及恢复，重启 IDE 后一切自动复原 —— 风险是可控的。
+ * <p><b>关于持久化，有一个反直觉的事实</b>：{@code setColor} 本身确实只改内存、
+ * 不碰文件，但<b>内存状态会被 IntelliJ 间接落盘</b> —— 用户只要在 Settings 里改过
+ * 任意一项编辑器设置并点了 OK，IDE 就会把当前配色方案<b>整体</b>保存下来，
+ * 透明光标随之写进 {@code colors/*.icls}。此后即使卸载插件，光标依然是隐形的：
+ * 坏值在磁盘上，已经与插件无关了。
+ *
+ * <p>本类因此加了一层防护：{@link #sanitizeCaretColor} 拒绝把"全透明"当成原始值
+ * 保存，避免恢复时把隐形原样还回去。详见 README 踩坑 #18。
  */
 public class NeovideCaretManager implements EditorFactoryListener {
 
@@ -44,6 +50,14 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
     /** 保存改动前的光标颜色，用于恢复；为 null 表示当前未隐藏 */
     private static volatile Color savedCaretColor = null;
+
+    /**
+     * 兜底光标色：Darcula / Dark 系方案的标准光标色。
+     *
+     * <p>仅在配色方案已被污染、且 {@code getDefaultForeground()} 也拿不到时启用，
+     * 见 {@link #sanitizeCaretColor}。
+     */
+    private static final Color FALLBACK_CARET_COLOR = new Color(0xA9, 0xB7, 0xC6);
 
     /** 是否已为「插件加载时已存在的编辑器」补建过动画 */
     private static volatile boolean initialScanDone = false;
@@ -239,13 +253,53 @@ public class NeovideCaretManager implements EditorFactoryListener {
             }
 
             EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-            savedCaretColor = scheme.getColor(EditorColors.CARET_COLOR);
+            savedCaretColor = sanitizeCaretColor(scheme, scheme.getColor(EditorColors.CARET_COLOR));
 
             scheme.setColor(EditorColors.CARET_COLOR, new Color(0, 0, 0, 0));
             repaintAllEditors();
         } catch (Throwable ignored) {
             // 配色方案不可用时静默跳过：此时原生光标会保留，但拖尾仍能正常工作
         }
+    }
+
+    /**
+     * 校验待保存的光标颜色，不可用时返回兜底值。
+     *
+     * <p><b>为什么需要这一步</b>：本类保存的"原始值"会被 {@link #restoreNativeCaret()}
+     * 原样恢复。如果这个原始值本身就是<b>全透明</b>，那么"恢复"等于什么都没做 ——
+     * 用户关掉插件依然看不到光标。而全透明恰恰是<b>本插件上一个会话留下的</b>：
+     * 隐藏期间用户若在 Settings 里改过设置并点 OK，透明色就被 IntelliJ 带进了
+     * 配置文件（见类注释与 README 踩坑 #18）。
+     *
+     * <p>同样地，配色方案里查不到该项时 {@code getColor} 会返回 {@code null}，
+     * 直接存 null 会让 {@link #restoreNativeCaret()} 提前返回、什么都不恢复，
+     * 光标同样回不来。两种情况都走兜底。
+     *
+     * <p>兜底优先取编辑器默认前景色 —— 它本来就是"这个配色下文字该有的颜色"，
+     * 与光标色通常一致；取不到再退回 {@link #FALLBACK_CARET_COLOR}。
+     *
+     * <p>取舍：万一用户是<b>故意</b>把原生光标设成隐形的，这里会把它恢复成可见。
+     * 考虑到"故意设隐形"极罕见、而"配置被污染后无法自愈"伤害更大，选择前者。
+     */
+    private static Color sanitizeCaretColor(EditorColorsScheme scheme, Color original) {
+        if (original != null && original.getAlpha() > 0) {
+            return original; // 正常的可见颜色，直接采用
+        }
+
+        Color fallback = null;
+        try {
+            fallback = scheme.getDefaultForeground();
+        } catch (Throwable ignored) {
+            // 个别 scheme 实现可能不支持，交给下面的常量兜底
+        }
+        if (fallback == null || fallback.getAlpha() == 0) {
+            fallback = FALLBACK_CARET_COLOR;
+        }
+
+        LOG.warn("neovide-cursor: 配色方案里的光标颜色为全透明（疑为历史遗留污染），"
+                + "关闭插件时将恢复为 #" + String.format("%06X", fallback.getRGB() & 0xFFFFFF)
+                + "。如仍不可见，请在 Settings | Editor | Color Scheme | General | Caret 中设置");
+        return fallback;
     }
 
     /** 恢复原生光标原始颜色 */
