@@ -1,370 +1,342 @@
 # Neovim Cursor for JetBrains IDE
 
-> 把 **Neovide 风格的拖尾光标**带到 JetBrains IDE —— 光标移动时留下渐隐的拖尾，带辉光光晕。
->
-> **适用**：IntelliJ IDEA / CLion / PyCharm 等 **2024.2 ~ 2026.2+** 的 JetBrains IDE
-> （已实测通过，详见[兼容性](#兼容性)）
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2024.2%2B-000000?logo=intellijidea&logoColor=white)
+![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)
+[![Stars](https://img.shields.io/github/stars/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains?style=flat)](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/total?style=flat)](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/releases)
 
-> **关于帧率**：受限于 Swing/AWT 的渲染机制，帧率不及 Electron 系的 VS Code 版 ——
-> 根因分析与实测数据见[已知限制](#已知限制)。功能与稳定性已可用于日常开发。
+> Brings the **Neovide-style trailing cursor** to JetBrains IDEs — the caret leaves a fading, stretched trail as it moves, wrapped in a soft glow.
 >
-> 文末的踩坑记录完整保留了开发过程中的关键决策与技术分析。
+> **Works with** IntelliJ IDEA / CLion / PyCharm and the rest of the JetBrains family on **2024.2 – 2026.2+** (all tested — see [Compatibility](#compatibility)).
+
+> **A note on frame rate**: Swing/AWT rendering can't match the Electron-based VS Code version. Root-cause analysis and benchmarks live in [Known Limitations](#known-limitations). Features and stability are ready for daily use.
+>
+> The [Lessons Learned](#lessons-learned) section at the end preserves every key decision and analysis from development.
 
 ---
 
-## 效果
+<div align="center">
 
-光标移动时：
+**Language / 语言 / 語言 / 言語 / 언어**
 
-- **拖尾**：光标被"拉长"成不规则四边形（弹簧模型）
-- **平滑跟随**：阻尼弹簧驱动，非瞬时跳变
-- **辉光**：边缘柔和光晕（模拟 Canvas `shadowBlur`），**随拖尾展开而亮起、光标静止时自动熄灭**
-- **原生光标隐藏**：避免与拖尾重叠
+[**English**](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja-JP.md) | [한국어](README.ko-KR.md)
 
-参数语义与 VS Code 版 `neovide-cursor` 对齐，便于跨平台迁移配置（唯一例外见[参数配置](#参数配置)）。
+</div>
 
-### 两种拖尾模型（可在菜单中随时切换）
+---
 
-| 模式 | 原理 | 特点 |
+## Features
+
+While the caret moves:
+
+- **Trail** — the caret stretches into an irregular quadrilateral (spring model)
+- **Smooth follow** — driven by damped springs, not instant jumps
+- **Glow** — a soft halo along the edges (approximating Canvas `shadowBlur`), which **lights up as the trail unfolds and fades out once the caret stops**
+- **Native caret hidden** — so it doesn't overlap the trail
+
+Parameter semantics match the VS Code `neovide-cursor` extension, so configs stay portable across platforms (one deliberate exception — see [Configuration](#configuration)).
+
+### Two trail models (switchable from the menu at any time)
+
+| Model | How it works | Notes |
 |---|---|---|
-| **弹簧**（默认） | 光标矩形的四个角点各挂一组阻尼弹簧，按运动方向分配不同滞后系数 → 矩形被拉伸 | Neovide 原版效果；依赖帧间插值 |
-| **残影** | 记录光标每帧的真实位置，绘制一串渐隐残影 | **掉帧不失真**，低帧率下更稳；辉光观感比弹簧模式更明显 |
+| **Spring** (default) | Each of the caret rectangle's four corners carries its own damped spring; lag factors are assigned by movement direction → the rectangle gets stretched | The original Neovide effect; depends on inter-frame interpolation |
+| **Afterimage** | Records the caret's true position every frame and draws a chain of fading ghosts | **Stays accurate when frames drop** — steadier at low frame rates, and the glow reads more strongly than in spring mode |
 
-两者共用同一套基础设施（覆盖层挂载、原生光标隐藏、高精度调度、局部重绘），
-只有「位置计算」部分不同。
+Both share the same infrastructure (overlay mounting, native caret hiding, high-precision scheduling, partial repaint). Only the position calculation differs.
 
 ---
 
-## 安装
+## Installation
 
-### 方式一：从 Release 下载（推荐）
+### Option 1 — Download from Releases (recommended)
 
-1. 到 [Releases](../../releases) 下载最新的 `*.zip`
-2. IDEA → `Settings` → `Plugins` → `⚙️` → `Install Plugin from Disk...`
-3. 选择该 zip，重启 IDE
+1. Grab the latest `*.zip` from [Releases](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/releases)
+2. In your IDE: `Settings` → `Plugins` → `⚙️` → `Install Plugin from Disk...`
+3. Pick the zip and restart the IDE
 
-### 方式二：自行构建
+### Option 2 — Build from source
 
 ```bash
-# 要求：JDK 21、Gradle 9.0+、IntelliJ Platform Gradle Plugin 2.x
+# Requirements: JDK 21, Gradle 9.0+, IntelliJ Platform Gradle Plugin 2.x
 ./gradlew buildPlugin
-# 产物：build/distributions/*.zip
+# Output: build/distributions/*.zip
 ```
 
-若使用本地已安装的 IDE（免下载数 GB 分发包），在 `build.gradle.kts` 中改：
+To use an already-installed IDE instead of downloading a multi-GB distribution, edit `build.gradle.kts`:
 
 ```kotlin
 dependencies {
     intellijPlatform {
-        local("D:/path/to/IntelliJIdea2025.2")   // 换成你的安装路径
+        local("D:/path/to/IntelliJIdea2025.2")   // point this at your install
     }
 }
 ```
 
 ---
 
-## 兼容性
+## Compatibility
 
-**支持范围：2024.2 ~ 2026.2 及以上**
+**Supported range: 2024.2 through 2026.2 and beyond**
 
-| IDE | 版本 | 状态 |
+| IDE | Version | Status |
 |---|---|---|
-| IntelliJ IDEA | 2024.2 – 2026.2 | ✅ 实测通过 |
-| CLion | 2025.2 | ✅ 实测通过 |
-| PyCharm | 2025.2 | ✅ 实测通过 |
+| IntelliJ IDEA | 2024.2 – 2026.2 | ✅ Tested |
+| CLion | 2025.2 | ✅ Tested |
+| PyCharm | 2025.2 | ✅ Tested |
 
-**为什么能跨 IDE 通用**：插件只依赖 `com.intellij.modules.platform`
-（平台核心模块），不涉及任何语言特有的 API，也不依赖 IDEA Ultimate 的专有功能。
-因此适用于所有 2024.2+ 的 JetBrains IDE ——
-WebStorm / PhpStorm / GoLand / RubyMine / Rider / DataGrip 等。
+**Why it works across every JetBrains IDE**: the plugin depends only on `com.intellij.modules.platform` — the platform core module. It touches no language-specific APIs and no IDEA Ultimate-only features. So it runs on any 2024.2+ JetBrains IDE: WebStorm / PhpStorm / GoLand / RubyMine / Rider / DataGrip, and the rest.
 
-### 版本下限为什么是 2024.2
+### Why the lower bound is 2024.2
 
-2024.2 是平台改用 **JBR 21** 的起点，与本插件的编译目标（Java 21）一致。
-2024.1 及更早运行在 **JBR 17** 上，加载 Java 21 字节码会直接抛
-`UnsupportedClassVersionError` 崩溃 —— 这是字节码层面的硬约束，与 API 无关。
+2024.2 is where the platform moved to **JBR 21**, matching this plugin's compile target (Java 21). 2024.1 and earlier run on **JBR 17**, and loading Java 21 bytecode there throws `UnsupportedClassVersionError` immediately. That's a hard bytecode-level constraint, unrelated to APIs.
 
-### 版本上限为什么不设
+### Why there's no upper bound
 
-`<idea-version since-build="242" />` 中**刻意省略了 `until-build`**。
-插件不含任何版本特定代码，对后续版本天然兼容，因此留空表示"适用于所有更新版本"。
+`<idea-version since-build="242" />` **deliberately omits `until-build`**. The plugin contains no version-specific code, so it's naturally compatible with future releases; leaving it empty means "applies to all newer versions".
 
-> 这是 JetBrains 官方推荐的写法。写死上限（如曾经的 `252.*`）会导致
-> **每次 IDE 升级插件都被判为"不兼容"**，用户只能等新版本发布 ——
-> 本插件早期版本正是栽在这里，详见踩坑 #17。
+> This follows JetBrains' official recommendation. Pinning an upper bound (as an earlier release did with `252.*`) means **every IDE upgrade marks the plugin incompatible**, leaving users stuck until a new release ships. This project fell into exactly that trap — see Lesson #17.
 
-### 想支持更早的版本？
+### Want to support older versions?
 
-需要把编译目标降到目标平台内置的 JBR 版本：
+You'd need to lower the compile target to whatever JBR ships with the target platform:
 
-| IDE 版本 | build | 内置 JBR | 所需编译目标 |
+| IDE version | build | Bundled JBR | Required target |
 |---|---|---|---|
 | 2022.x | 221–223 | 11 | Java 11 |
 | 2023.x | 231–233 | 17 | Java 17 |
 | 2024.1 | 241 | 17 | Java 17 |
-| **2024.2+** | **242+** | **21** | **Java 21（当前）** |
+| **2024.2+** | **242+** | **21** | **Java 21 (current)** |
 
-好消息是**低版本字节码能被高版本 JBR 加载** ——
-降低编译目标不会影响现已支持的 2024.2~2026.2，属于纯扩展。
-
----
-
-## 使用
-
-- **开关**：`Tools` 菜单 → `Neovide 拖尾光标（开关）`
-- **切换拖尾模型**：`Tools` 菜单 → `Neovide 光标：残影模式（低帧率更稳）`
-  - **勾选** = 残影模式；**取消** = 弹簧模式（Neovide 原版效果）
-  - **即时生效**，无需重启 IDE
-- **性能诊断**：`Tools` 菜单 → `Neovide 光标：性能诊断（禁用重绘）`
-  - 勾选后跳过全部绘制，只跑物理计算。用于区分「绘制慢」还是「调度慢」——**这是个很有用的排查手段**
-
-关闭开关会立即恢复原生光标并移除覆盖层。
+The good news: **lower bytecode loads fine on newer JBRs** — lowering the target won't break the currently supported 2024.2–2026.2 range. It's purely additive.
 
 ---
 
-## 参数配置
+## Usage
 
-全部参数在 `core/NeovideConfig.java`，命名与语义均对齐 VS Code 版 `neovide-cursor.js` 的 `cursorConfig`：
+- **Toggle**: `Tools` menu → `Neovide 拖尾光标（开关）`
+- **Switch trail model**: `Tools` menu → `Neovide 光标：残影模式（低帧率更稳）`
+  - **Checked** = afterimage mode; **unchecked** = spring mode (the original Neovide effect)
+  - **Takes effect immediately**, no restart needed
+- **Performance diagnostics**: `Tools` menu → `Neovide 光标：性能诊断（禁用重绘）`
+  - Skips all drawing and runs only the physics. Use it to tell "slow drawing" apart from "slow scheduling" — **a genuinely useful troubleshooting tool**
 
-| 参数 | 默认值 | 说明 |
+Turning the toggle off instantly restores the native caret and removes the overlay.
+
+---
+
+## Configuration
+
+Every parameter lives in `core/NeovideConfig.java`, named and behaving identically to `cursorConfig` in the VS Code `neovide-cursor.js`:
+
+| Parameter | Default | Description |
 |---|---|---|
-| `tailColor` | `#FFC0CB` | 拖尾颜色 |
-| `useShadow` / `shadowColor` | `true` / `#FFC0CB` | 辉光开关与颜色 |
-| `shadowBlurFactor` | `0.2` | 辉光外扩半径 = 该系数 × 光标较长边（**已偏离原版 0.6，原因见踩坑 #15**） |
-| `animationLength` | `0.1` | 常规动画时长（秒），越大拖尾越长 |
-| `shortAnimationLength` | `0.05` | 短距离移动的动画时长 |
-| `shortMoveThreshold` | `8` | 短距离判定阈值 |
-| `trailFactors` | `1 / 0.9 / 0.5 / 0.3` | 四角滞后系数（拖尾拉伸的核心） |
-| `useHardSnap` / `leadingSnapThreshold` | `true` / `0.5` | 前缘角硬吸附 |
-| `maxTrailDistanceFactor` | `60` | 拖尾最大长度系数，与原版一致（见踩坑 #6） |
-| `glowLayers` / `glowOpacity` | `12` / `0.55` | 辉光的层数与峰值强度（**层数不影响亮度**，见下文「辉光的模拟」） |
+| `tailColor` | `#FFC0CB` | Trail color |
+| `useShadow` / `shadowColor` | `true` / `#FFC0CB` | Glow toggle and color |
+| `shadowBlurFactor` | `0.2` | Glow expansion radius = factor × the caret's longer edge (**deviates from the original 0.6 — see Lesson #15**) |
+| `animationLength` | `0.1` | Normal animation duration (seconds); larger = longer trail |
+| `shortAnimationLength` | `0.05` | Duration for short moves |
+| `shortMoveThreshold` | `8` | Short-move threshold |
+| `trailFactors` | `1 / 0.9 / 0.5 / 0.3` | Per-corner lag factors (the heart of trail stretching) |
+| `useHardSnap` / `leadingSnapThreshold` | `true` / `0.5` | Hard snap for leading corners |
+| `maxTrailDistanceFactor` | `60` | Max trail length factor, matching the original (see Lesson #6) |
+| `glowLayers` / `glowOpacity` | `12` / `0.55` | Glow layer count and peak intensity (**layer count doesn't change brightness** — see "Simulating the glow" below) |
 
-> 除 `shadowBlurFactor` 外，本表与原版 `cursorConfig` **逐项一致**。
-> 若您觉得光晕偏大或偏小，只需调 `shadowBlurFactor` 一个数：
-> `0.15` ≈ 光晕总宽 12px（贴着光标）／`0.2` 默认 ≈ 15px／`0.3` ≈ 21px／`0.6` 原版数值 ≈ 40px。
+> Apart from `shadowBlurFactor`, this table matches the original `cursorConfig` **item for item**.
+> If the halo feels too large or too small, tune that single number:
+> `0.15` ≈ 12px total glow width (hugging the caret) / `0.2` default ≈ 15px / `0.3` ≈ 21px / `0.6` (the original value) ≈ 40px.
 
 ---
 
-## 技术实现（供参考）
+## Implementation Notes
 
-### 1. 挂载点：只能挂在 `contentComponent` 上
+### 1. The mount point: `contentComponent` only
 
-这是本项目**最重要的结论**。
+This is the project's **single most important finding**.
 
-实测表明，`editor.getContentComponent()`（实际类型 `EditorComponentImpl`）是**唯一安全的挂载点**：
+Testing showed `editor.getContentComponent()` (actual type `EditorComponentImpl`) is the **only safe mount point**:
 
-| 特性 | 为什么关键 |
+| Property | Why it matters |
 |---|---|
-| 它是 `JTextComponent`，**`layout` 为 `null`** | 没有 `LayoutManager` 会在 `revalidate()` 时重新布局并拉伸覆盖层 |
-| 坐标系与 `visualPositionToXY()` **天然对齐** | 完全不需要坐标转换 |
+| It's a `JTextComponent` with **`layout == null`** | With no `LayoutManager`, nothing re-lays-out and stretches the overlay during `revalidate()` |
+| Its coordinate system **already matches `visualPositionToXY()`** | No coordinate conversion needed at all |
 
-**曾经尝试并已证伪的挂载点**（都会导致覆盖层被拉伸到整个编辑器、表现为"全屏变色"）：
+**Mount points tried and disproven** (each one stretches the overlay across the whole editor, showing up as "the screen changes color"):
 
-- `contentComponent.getParent()`（`JBViewport`）
-- `editor.getComponent()`（编辑器面板）
-- 祖先 `JLayeredPane`（社区方案所称，实测它确实存在——`EditorImpl$PanelWithFloatingToolbar`——但**不能用于此目的**）
-- 窗口根 `LayeredPane`
+- `contentComponent.getParent()` (the `JBViewport`)
+- `editor.getComponent()` (the editor panel)
+- An ancestor `JLayeredPane` (the community-suggested approach — it does exist, as `EditorImpl$PanelWithFloatingToolbar`, but **cannot be used for this**)
+- The window's root `LayeredPane`
 
-### 2. 拖尾原理：拉伸，不是残影
+### 2. How the trail works: stretching, not ghosting
 
-原版（以及本项目）的核心机制**不是叠加多张残影**，而是：
+The original's mechanism (and this project's) is **not** "stack up multiple afterimages". It's:
 
-1. 光标矩形有 **4 个角点**，每个角点各挂一组 X/Y 阻尼弹簧
-2. 光标移动时，按「运动方向与角点方向的夹角」给四角**排序**（`assignRanks`）
-3. 位于运动**前方**的角拿到大系数（跟得紧，甚至硬吸附），**后方**的角拿到小系数（拖沓）
-4. 于是矩形被**拉长成不规则四边形** —— 视觉上就是拖尾
+1. The caret rectangle has **4 corners**, each carrying its own X/Y damped spring
+2. As the caret moves, the corners are **ranked** by the angle between the movement direction and each corner's direction (`assignRanks`)
+3. Corners **ahead** of the movement get large factors (they keep up, and may hard-snap); corners **behind** get small factors (they lag)
+4. The rectangle is thereby **stretched into an irregular quadrilateral** — visually, that's the trail
 
-这个设计比残影方案更省（只需 4 个点），但**对单帧插值精度要求高**，在低帧率下会暴露问题（见下文）。
+This design is cheaper than ghosting (only 4 points), but it **demands accurate per-frame interpolation**, and that shows at low frame rates (see below).
 
-### 3. 残影模型的实现要点
+### 3. Implementing the afterimage model
 
-残影模型看似比弹簧模型简单（记录位置 + 画出来），但有两个**不做就完全不成立**的细节：
+The afterimage model looks simpler than the spring model (record positions, draw them), but two details make or break it:
 
-**(a) 必须在采样点之间补插值点**
+**(a) Interpolate between samples**
 
-低帧率下每帧位移很大（20fps 时一次跳转可能跨 200px+），
-若只记录采样端点，得到的会是几个相距几十上百像素的**孤立方块** ——
-看起来就是"光标在跳"，完全没有拖尾。
+At low frame rates each frame moves a long way (a single jump can span 200px+ at 20fps). Recording only the sampled endpoints yields a few **isolated blocks** dozens or hundreds of pixels apart — it reads as "the caret is teleporting", not as a trail.
 
-按固定间距（`MAX_GAP_PX = 5`）补点后，轨迹才是连续的。
-**时间戳也要同步插值**，否则补出来的点会等亮度，形成"一串生硬的方块"。
+Filling in points at a fixed spacing (`MAX_GAP_PX = 5`) makes the path continuous. **Timestamps must be interpolated too**, or the inserted points share one brightness and form "a string of stiff blocks".
 
-**(b) 必须额外画一个常驻光标**
+**(b) Draw a permanent caret on top**
 
-残影有寿命（`lifetime`），到期即被淘汰 ——
-**光标静止一会儿后所有残影淡出，画面就空了**。
-因此每帧还要在当前位置画一个 alpha 恒为 1 的"光标本体"。
-（绘制尾巴时要跳过与当前位置重合的采样点，否则两者叠加会让该处颜色偏深。）
+Ghosts have a lifetime and get evicted on expiry — **after the caret sits still for a moment, every ghost fades and the screen is empty**. So each frame must also draw the caret itself at full alpha. (Skip samples that coincide with the current position when drawing the tail, or the two overlap and darken that spot.)
 
-> 弹簧模型没有这个问题：四个角点永远停在目标位置。
+> The spring model has no such problem: its four corners always rest at the target position.
 
-### 4. 辉光的模拟：多层同心外扩
+### 4. Simulating the glow: concentric expansion in layers
 
-Canvas 的 `shadowBlur` 是真正的高斯模糊，Swing 没有等价物。本项目的逼近方式是
-**多层同心外扩 + 填充**：从最外层（外扩量最大）逐层向内绘制，
-层与层之间由 SrcOver 自然累加，于是形成「内亮外暗」的连续渐变。
+Canvas's `shadowBlur` is a true Gaussian blur, and Swing has no equivalent. This project approximates it with **layers of concentric expansion, filled**: draw from the outermost layer (largest expansion) inward, letting SrcOver accumulate naturally between layers — producing a continuous "bright inside, dim outside" gradient.
 
-**每层 alpha 由层数反解**。设每层独立不透明度为 A，N 层叠加后最内层的累积为
-`1 - (1-A)^N`；令它恰好等于 `glowOpacity`，即
+**Each layer's alpha is solved from the layer count.** Let each layer's independent opacity be A; after N layers the accumulated opacity at the innermost layer is `1 - (1-A)^N`. Setting that equal to `glowOpacity` gives:
 
 ```
 A = 1 - (1 - peak)^(1/N)
 ```
 
-这样「层数」与「强度」两个参数互不干扰 —— 加层数只会让过渡更细腻，
-**不会让光晕整体变亮**。
+This keeps "layer count" and "intensity" independent — adding layers only smooths the falloff, it **never brightens the halo overall**.
 
-**半径按线性分布**。累积不透明度在半径 r 处为 `1-(1-A)^k`，k 是覆盖该点的层数；
-半径线性分布时 k 也线性，算出在 `r ≈ glowWidth/2` 处刚好衰减到峰值的约 60%，
-与高斯曲线吻合。
+**Radii are distributed linearly.** Accumulated opacity at radius r is `1-(1-A)^k`, where k is the number of layers covering that point; with linear radii, k is linear too, and the falloff works out to roughly 60% of peak at `r ≈ glowWidth/2` — a good match for a Gaussian curve.
 
-**光晕必须贴着四边形本身**。这一条试错了三次（对应踩坑 #12 → #13 → #14）：
+**The halo must hug the quadrilateral itself.** This took three attempts (Lessons #12 → #13 → #14):
 
-| 尝试 | 失败原因 |
+| Attempt | Why it failed |
 |---|---|
-| 多层**居中描边** | 描边路径是矩形的边界线而非内部，最亮层只外扩不到 1px 且被不透明主体盖住 |
-| 用**包围盒**做形状 | 拖尾时四角被拉成细长斜条，包围盒却能覆盖大半个编辑器 → 跨行跳转时撑成大方块 |
-| **精确外扩**（最终采用） | 逐边外法线平移 + 相邻边求交；锐角处需按 √2 截断，否则甩出长尖刺 |
+| Multi-layer **centered stroke** | A stroke path is the rectangle's *outline*, not its interior — the brightest layer expands less than 1px and is covered by the opaque body |
+| Using the **bounding box** as the shape | During a trail the corners are pulled into a long thin diagonal, while the bounding box can cover most of the editor → it balloons into a large square on line jumps |
+| **Exact expansion** (final) | Offset each edge along its outward normal, intersect adjacent edges; clamp to √2 at sharp corners, or long spikes shoot out |
 
-**辉光只在运动时点亮**：强度由四角相对目标的最大偏移量驱动 ——
-静止时偏移为 0，完全跳过绘制；任何真实移动的偏移至少是一个字符宽（约 8px）
-或一行高（约 32px），因此取 2.5px 作为满强度阈值就能保证**移动时的观感丝毫不受影响**。
-详见踩坑 #16。
+**The glow only lights up while moving.** Its intensity is driven by the largest offset of any corner from its target — at rest the offset is 0 and drawing is skipped entirely; any real movement produces an offset of at least one character width (~8px) or one line height (~32px), so a 2.5px full-intensity threshold leaves **the in-motion look pixel-identical to before**. See Lesson #16.
 
-### 5. 隐藏原生光标
+### 5. Hiding the native caret
 
-IntelliJ **没有**隐藏光标的公开 API —— `Editor` / `CaretModel` / `Caret` 三个接口
-均已用 `javap` 反编译确认（`Editor` 只提供 `getColorsScheme()`，没有 setter，
-因此也不存在"只隐藏某一个编辑器"的做法）。
+IntelliJ has **no** public API for hiding the caret — verified by decompiling the `Editor` / `CaretModel` / `Caret` interfaces with `javap` (`Editor` exposes only `getColorsScheme()`, no setter, so there's no way to hide just one editor's caret either).
 
-唯一可行路径是改**全局配色方案**：
+The only viable path is modifying the **global color scheme**:
 
 ```java
 EditorColorsManager.getInstance().getGlobalScheme()
         .setColor(EditorColors.CARET_COLOR, new Color(0, 0, 0, 0));
 ```
 
-⚠️ **这个操作是全局的，代价必须自己兜住**：一旦隐藏，IDE 内**所有**编辑器的原生光标
-都会消失 —— 包括那些我们并不打算接管的（Build / Run / Services 等输出区）。
-**凡是被隐藏的，都必须由我们补画一个替代光标**，否则那些位置的光标会彻底消失。
-详见踩坑 #8。
+⚠️ **This is a global operation, and the cost is ours to absorb**: once hidden, **every** editor's native caret in the IDE disappears — including ones we never intended to take over (output areas like Build / Run / Services). **Whatever gets hidden must be given a replacement caret**, or those carets vanish entirely. See Lesson #8.
 
-**⚠️ 一个反直觉的持久化路径**：`setColor` 本身确实只改内存、不写入配置文件，
-但**内存状态会被 IDE 间接落盘** —— 用户只要在 Settings 里改过任意一项编辑器设置
-并点击 OK，IntelliJ 就会把当前配色方案**整体**保存，透明光标随之写进
-`colors/_@user_<方案名>.icls`。此后**卸载插件也无法自愈**，因为坏值已经落在磁盘上了。
+**⚠️ A counterintuitive persistence path**: `setColor` does only touch memory and doesn't write files — but **the in-memory state can be persisted by the IDE itself**. If the user changes any editor setting in Settings and clicks OK, IntelliJ saves the **entire** color scheme, writing the transparent caret into `colors/_@user_<scheme>.icls`. From then on **even uninstalling the plugin won't heal it**, because the bad value is on disk.
 
-本插件对此加了防护：`sanitizeCaretColor()` 拒绝把"全透明"当作原始值保存，
-关闭插件时会改用编辑器默认前景色恢复。详见踩坑 #18。
+The plugin now guards against this: `sanitizeCaretColor()` refuses to store "fully transparent" as the original value, falling back to the editor's default foreground color on restore. See Lesson #18.
 
-### 6. 高精度调度：不要用 `javax.swing.Timer`
+### 6. High-precision scheduling: don't use `javax.swing.Timer`
 
-实测数据（Windows 11 + JDK 21）：
+Measured on Windows 11 + JDK 21:
 
-| 定时机制 | 实测精度 |
+| Timing mechanism | Measured precision |
 |---|---|
-| `javax.swing.Timer`（内部走 `Object.wait`） | **15.61 ms** ❌ |
+| `javax.swing.Timer` (uses `Object.wait` internally) | **15.61 ms** ❌ |
 | `LockSupport.parkNanos` | 15.35 ms ❌ |
 | **`Thread.sleep`** | **1.56 ms** ✅ |
-| 系统时钟粒度 | 1.08 ms |
+| System clock granularity | 1.08 ms |
 
-系统时钟本身是高精度的，但 `Swing Timer` 用的 `Object.wait` 拿不到 —— 它把帧率钉死在 **64fps**。
+The system clock itself is precise, but `javax.swing.Timer`'s `Object.wait` can't reach it — it pins the frame rate to **64fps**.
 
-因此改为：**后台线程 `Thread.sleep` 调度 + `invokeLater` 切回 EDT 绘制**。
+So the plugin uses: **a background thread with `Thread.sleep` for scheduling, plus `invokeLater` to draw back on the EDT**.
 
 ---
 
-## 踩坑记录
+## Lessons Learned
 
-> 以下每一条都是实测踩出来的，供后来者参考。
+> Every item below was learned the hard way. Recorded for whoever comes next.
 
-### #1 不要调用 `container.revalidate()`
+### #1 Don't call `container.revalidate()`
 
-对带 `LayoutManager` 的容器，`revalidate()` 会让布局管理器重新布局**所有**子组件，把覆盖层从 10×24 拉伸到整个编辑器 → **全屏变色**。
+On a container with a `LayoutManager`, `revalidate()` makes the layout manager re-lay-out **all** children, stretching the overlay from 10×24 to the whole editor → **the screen changes color**.
 
-**只用 `repaint()`。**
+**Use `repaint()` only.**
 
-### #2 不要在 `paintComponent` 里绘制背景
+### #2 Don't paint a background in `paintComponent`
 
-覆盖层只画多边形，**绝不画任何矩形背景**。这样即使被意外拉伸，也只会显示多边形本身。
+The overlay draws polygons and **never any rectangular background**. That way, even if it gets stretched accidentally, only the polygon shows.
 
-### #3 不要用 `paintImmediately`（重要）
+### #3 Don't use `paintImmediately` (important)
 
-曾为了"减少 EDT 调度延迟"把 `repaint` 改成 `paintImmediately`，结果**性能反而大幅下降**：
+Trying to "reduce EDT scheduling latency", I swapped `repaint` for `paintImmediately` — and **performance dropped sharply**:
 
-| 版本 | 峰值 fps |
+| Version | Peak fps |
 |---|---|
-| `repaint`（异步） | **105.6** |
-| `paintImmediately`（同步） | **36.9** |
+| `repaint` (async) | **105.6** |
+| `paintImmediately` (sync) | **36.9** |
 
-原因：`paintImmediately` 除了同步绘制本区域，还会**顺带把 `RepaintManager` 中所有排队的脏区一次性处理掉** —— 删除文本等操作产生大量脏区时，EDT 被长时间阻塞。
+The reason: besides synchronously painting its own region, `paintImmediately` also **flushes every queued dirty region in the `RepaintManager` at once** — when operations like deleting text produce many dirty regions, the EDT gets blocked for a long time.
 
-**`repaint` 的"异步"不是缺陷，而是让 `RepaintManager` 有机会合并优化。**
+**`repaint`'s asynchrony isn't a flaw — it's what gives `RepaintManager` room to coalesce and optimize.**
 
-### #4 不要改弹簧的衰减因子 `c`
+### #4 Don't touch the spring's decay factor `c`
 
-弹簧的更新公式中，`c` 不只是衰减系数，**它还参与速度积分**：
+In the spring update formula, `c` isn't just a decay coefficient — **it participates in the velocity integral**:
 
 ```java
-position = (a + b * dt) * c;    // b 里已含"速度带来的位移"
+position = (a + b * dt) * c;    // b already contains "displacement from velocity"
 ```
 
-曾试图给 `c` 设下界来改善低帧率观感，结果位置被**反向放大**：
+I once tried giving `c` a lower bound to improve the low-frame-rate look, and positions got **amplified instead**:
 
 ```
-正常：c=0.135 → (100 + 4000×0.05) × 0.135 = 40.5   ✓ 衰减
-改坏：c=0.5   → (100 + 4000×0.05) × 0.5   = 150    ✗ 放大 1.5 倍！
+Normal:  c=0.135 → (100 + 4000×0.05) × 0.135 = 40.5   ✓ decays
+Broken:  c=0.5   → (100 + 4000×0.05) × 0.5   = 150    ✗ amplified 1.5×!
 ```
 
-逐帧累积后动画直接**鬼畜**。
+Accumulated over frames, the animation goes berserk.
 
-**要限制单帧位移，必须在算出结果后限制 `position` 的变化量。**
+**To limit per-frame displacement, clamp the change in `position` *after* computing it.**
 
-### #5 不要依赖 `caretPositionChanged` 的时序
+### #5 Don't rely on the timing of `caretPositionChanged`
 
-删除文本等场景下，光标事件可能在 `visualPositionToXY()` 数据更新**之前**触发 —— 此时读到旧位置，而之后不会再有新事件，拖尾会**永久卡在旧位置**。
+In scenarios like deleting text, the caret event may fire **before** `visualPositionToXY()`'s data updates — so you read a stale position, and no further event arrives, leaving the trail **stuck at the old position forever**.
 
-**正确做法**：每个 tick 都重新读取光标位置，事件仅用于"唤醒"到高帧率。同时用轻量的 `getVisualPosition()` 做快速路径，避免每帧都做昂贵的坐标换算。
+**The fix**: re-read the caret position every tick, and use events only to "wake up" into a high frame rate. Also use the cheap `getVisualPosition()` as a fast path, so you're not doing an expensive coordinate conversion every frame.
 
-### #6 拖尾最大长度要收紧
+### #6 Tighten the maximum trail length
 
-原版 JS 的 `maxTrailDistanceFactor = 60`（约 1920px），在 Canvas 全屏重绘下没问题。
+The original JS uses `maxTrailDistanceFactor = 60` (~1920px), which is fine when Canvas repaints the whole screen.
 
-但 Swing 覆盖层必须**局部重绘** —— 拖尾越长，需要重绘的包围盒越大，跨行跳转时会直接退化成接近全屏的重绘。
+But a Swing overlay **must repaint partially** — the longer the trail, the larger the bounding box to repaint, degrading into a near-full-screen repaint on line jumps.
 
-**收紧到 4（约 128px）后，正常移动完全不受影响。**
+**Tightened to 4 (~128px), normal movement is completely unaffected.**
 
-### #7 重绘区域要分别提交，不能 union
+### #7 Submit repaint regions separately, never unioned
 
-把「上一帧区域」和「当前帧区域」union 成一个大矩形再重绘，在跨行跳转时会覆盖大半个编辑器。
+Unioning "last frame's region" and "this frame's region" into one big rectangle covers most of the editor on a line jump.
 
-**分开提交两次 `repaint`。**
+**Submit two separate `repaint` calls.**
 
-### #8 控制台编辑器：不能一概过滤，也不能一概接管
+### #8 Console editors: don't filter them out wholesale, and don't take them over wholesale
 
-这一条前后错了两次，记录完整结论。
+This one was wrong twice. Recording the full conclusion.
 
-**第一次的错**：用 `EditorKind.CONSOLE` 一概过滤掉，理由是"终端光标自带，
-挂上去只会多一个不跟随的假光标"。**这个理由对终端成立，对输出控制台却不成立** ——
-Build / Run / Services / Problems 的输出区同样是 `CONSOLE`，
-但它们的光标**恰恰是被 `CARET_COLOR` 控制的**。全局隐藏 + 一概过滤
-= 这些位置的光标全部消失。
+**First mistake**: filtering everything with `EditorKind.CONSOLE`, reasoning that "the terminal draws its own caret, so mounting here just adds a fake caret that doesn't follow". **That reasoning holds for the terminal, but not for output consoles** — the output areas of Build / Run / Services / Problems are also `CONSOLE`, yet their carets **are** controlled by `CARET_COLOR`. Global hiding + wholesale filtering = every one of those carets disappears.
 
-**第二次的错**：既然不能过滤，那就给所有 `CONSOLE` 补画光标。
-结果**终端变成了双光标** —— 终端自己的光标本来就没被隐藏，我们多画了一个，
-而且位置还不同步（我们读 Editor 的 caret，终端实际光标由模拟器维护，实测差一个字符）。
+**Second mistake**: since filtering is wrong, draw a caret for every `CONSOLE`. Result: **the terminal got a double caret** — the terminal's own caret was never hidden, so we added a second one, at a position that doesn't even sync (we read the Editor's caret while the terminal's real caret is maintained by the emulator; measured one character off).
 
-**正确做法：两类分开处理。**
+**The right approach: handle the two separately.**
 
-| 编辑器 | 光标来源 | 处理方式 |
+| Editor | Caret source | Treatment |
 |---|---|---|
-| 代码编辑器（`MAIN_EDITOR`） | `CARET_COLOR` | 隐藏 + 拖尾 |
-| 输出控制台（`CONSOLE`） | `CARET_COLOR` | **补画静态光标**（不做拖尾） |
-| 终端（`CONSOLE`） | 终端模拟器自绘 | **跳过**，什么都不做 |
+| Code editor (`MAIN_EDITOR`) | `CARET_COLOR` | Hide + trail |
+| Output console (`CONSOLE`) | `CARET_COLOR` | **Draw a static caret** (no trail) |
+| Terminal (`CONSOLE`) | Drawn by the terminal emulator | **Skip entirely** |
 
-**难点在于后两者类型完全相同**：`TerminalEditorFactory.createOutputEditor()`
-返回的就是标准 `EditorImpl`，两者的 `EditorKind` 也都是 `CONSOLE`，靠类型无法区分。
-最终改为**沿组件树向上遍历**，命中 terminal 包名即判定为终端：
+**The hard part is that the latter two are the same type**: `TerminalEditorFactory.createOutputEditor()` returns a plain `EditorImpl`, and both have `EditorKind.CONSOLE` — type alone can't tell them apart. The solution is **walking up the component tree** and matching terminal package names:
 
 ```java
 Component c = editor.getContentComponent();
@@ -372,243 +344,208 @@ while (c != null) {
     String name = c.getClass().getName();
     if (name.startsWith("com.intellij.terminal")
             || name.startsWith("org.jetbrains.plugins.terminal")) {
-        return true;   // 终端，跳过
+        return true;   // terminal, skip
     }
     c = c.getParent();
 }
 ```
 
-用**包名前缀**而非具体类名，是因为终端在近几个版本换过实现
-（`org.jetbrains.plugins.terminal` → `com.intellij.terminal.frontend`），包名却始终稳定。
+Matching **package prefixes** rather than concrete class names matters because the terminal implementation has changed across releases (`org.jetbrains.plugins.terminal` → `com.intellij.terminal.frontend`) while the package names stayed stable.
 
-> **教训**：当某个操作带**全局副作用**时，"跳过某类对象"和"放过某类对象"
-> 是两件完全不同的事。过滤条件必须回到副作用的**实际作用域**去核对，
-> 而不能只看"这类对象自己需不需要被处理"。
+> **Lesson**: when an operation has **global side effects**, "skipping a class of objects" and "leaving a class of objects alone" are two entirely different things. The filter must be checked against the side effect's **actual scope**, not just against "does this object itself need handling".
 
-### #9 残影必须补插值点，否则只是"光标在跳"
+### #9 Afterimages must interpolate, or it's just "the caret teleporting"
 
-见上文「残影模型的实现要点」第 (a) 条。这是第一版残影模式完全失效的原因 ——
-低帧率下只有几个相距上百像素的采样点，视觉上就是光标在跳。
+See "Implementing the afterimage model", point (a). This is why the first version of afterimage mode failed completely — at low frame rates there were only a few sample points hundreds of pixels apart, which just looks like the caret jumping.
 
-### #10 残影模式必须额外画常驻光标
+### #10 Afterimage mode must draw a permanent caret
 
-见上文「残影模型的实现要点」第 (b) 条。这是从弹簧模型移植时最容易漏掉的一处差异 ——
-弹簧的角点永远停在目标位置，而残影会随时间淡出，静止一会儿画面就空了。
+See "Implementing the afterimage model", point (b). This is the easiest difference to miss when porting from the spring model — the spring's corners always rest at the target, while afterimages fade with time, leaving the screen empty after a moment.
 
-### #11 拖尾最大长度要按"重绘代价"而非"视觉效果"来定
+### #11 Set the max trail length by "repaint cost", not "visual effect"
 
-见上文 #6。补充一点：**跨行跳转是最严苛的场景** ——
-它同时放大了「拖尾拉伸」与「重绘面积」两个因素，
-调参时应当专门用它来验证，而不是只在同行内移动测试。
+See #6 above. One addition: **line jumps are the harshest scenario** — they amplify both "trail stretching" and "repaint area" at once. Tune against them specifically, not just movement within a line.
 
-### #12 辉光不能用「居中描边」实现
+### #12 The glow can't be done with a "centered stroke"
 
-`BasicStroke` 的描边路径是矩形的**边界线**，不是内部 —— 各层向外只扩 `strokeWidth/2`。
+`BasicStroke`'s path is the rectangle's **outline**, not its interior — each layer expands outward by only `strokeWidth/2`.
 
-IntelliJ 光标极窄（2×32），于是最亮的那层（strokeWidth 最小）只向外扩不到 1px，
-随即被随后填充的不透明主体盖住；而真正扩得够远的层，alpha 已衰减到 2% 以下。
+The IntelliJ caret is extremely narrow (2×32), so the brightest layer (smallest strokeWidth) expands less than 1px and is immediately covered by the opaque body filled afterward; meanwhile the layers that do expand far enough have alpha decayed below 2%.
 
-**结果是「只有模糊、没有发光」** —— 这正是最初"弹簧模式感觉不到辉光"的根因。
+**The result is "blur without glow"** — the exact root cause of the original complaint that "spring mode has no visible glow".
 
-**正确做法**：多层同心**外扩**（填充），而不是描边。
+**The fix**: multi-layer concentric **expansion** (filled), not stroking.
 
-### #13 光晕形状不能用包围盒
+### #13 Don't use the bounding box as the halo shape
 
-改用外扩后，曾图省事拿 `polygon.getBounds()` 当光晕形状，理由是
-"光晕本身是模糊的，包围盒的误差应该看不出来"。
+After switching to expansion, I lazily used `polygon.getBounds()` as the halo shape, reasoning that "the halo is blurry anyway, the bounding box error shouldn't be visible".
 
-**这个判断完全错了。** 拖尾时四个角点被拉成一条斜向的细长四边形，
-而它的**包围盒**却能覆盖大半个编辑器 —— 跨行跳转的瞬间，
-光晕会先撑成一个巨大方块再随四边形收拢而收缩，与"贴着拖尾发光"毫不相干。
+**That judgment was completely wrong.** During a trail the four corners stretch into a long diagonal quadrilateral, while its **bounding box** can cover most of the editor — at the instant of a line jump the halo balloons into a huge square before contracting with the quadrilateral, having nothing to do with "glowing along the trail".
 
-**教训**：涉及形状的近似，必须验证**最坏情况**（跨行跳转），不能只看静止状态。
+**Lesson**: for shape approximations, verify the **worst case** (line jumps) — don't just look at the resting state.
 
-### #14 精确外扩在锐角处会失控
+### #14 Exact expansion goes out of control at sharp corners
 
-多边形外扩的精确解里，角点偏移量 ∝ `1/cos(θ/2)` —— 夹角越小，交点越远。
+In the exact solution for polygon expansion, corner offset ∝ `1/cos(θ/2)` — the sharper the angle, the farther the intersection point.
 
-拖尾时四边形被拉成细长条，**前后两端正是锐角**，实测偏移可达目标值的 **2.4 倍**，
-光晕会从两端甩出长尖刺。
+During a trail the quadrilateral is pulled into a long thin strip, and **the two ends are exactly the sharp corners**; measured offsets reached **2.4×** the target value, sending long spikes out from both ends.
 
-**修正**：把偏移向量的模长截断到 `√2`。正交处（静止矩形）的偏移量恰好就是 √2，
-不受影响；锐角处则被压回合理范围 —— 这也更接近真实高斯模糊对锐角的"磨圆"行为。
+**The fix**: clamp the offset vector's magnitude to `√2`. At right angles (a resting rectangle) the offset is exactly √2 already, so nothing changes there; sharp corners get pulled back into a sane range — which also better matches how a real Gaussian blur "rounds off" sharp corners.
 
-> 该修正的正确性由 `tools/OffsetTest.java` 独立验算确认 ——
-> 验证项：静止矩形外扩量精确、中心零漂移、锐角被 √2 截断、外扩后仍为凸四边形。
-> 用法：`javac -encoding UTF-8 tools/OffsetTest.java && java OffsetTest`
+> This correction's validity is confirmed by `tools/OffsetTest.java`, a standalone check.
+> It verifies: exact expansion of a resting rectangle, zero center drift, √2 clamping at sharp corners, and convexity preserved.
+> Usage: `javac -encoding UTF-8 tools/OffsetTest.java && java OffsetTest`
 
-### #15 辉光尺寸不能直接套用原版的 `shadowBlurFactor`
+### #15 The glow size can't reuse the original's `shadowBlurFactor`
 
-原版 `shadowBlurFactor = 0.6` 描述的是 Canvas `shadowBlur`，即高斯模糊的**直径**。
+The original's `shadowBlurFactor = 0.6` describes Canvas's `shadowBlur` — the **diameter** of a Gaussian blur.
 
-模糊会摊开能量，**图形越窄，峰值被稀释得越厉害**：VS Code 的光标有 8px 宽，
-尚能撑住；IntelliJ 的光标只有 2px 宽，把同一个数值直接当作外扩半径使用，
-会得到一团宽约 40px 的椭圆雾（是光标宽度的 20 倍），完全谈不上"贴着光标发光"。
+Blur spreads energy around, and **the narrower the shape, the more the peak gets diluted**: VS Code's caret is 8px wide and can carry it; IntelliJ's caret is only 2px wide, so reusing the same number as an expansion radius yields a ~40px-wide elliptical fog (20× the caret width) — nothing like "glowing against the caret".
 
-**修正**：降到 `0.2`，光晕总宽约 15px。
+**The fix**: lower it to `0.2`, giving a total glow width around 15px.
 
-> 这是本项目**唯一一处有意偏离原版参数**的地方。想还原那种夸张的大范围光雾，
-> 把它调回 `0.6` 即可。
+> This is the project's **only deliberate deviation** from the original parameters. To restore that exaggerated wide haze, set it back to `0.6`.
 
-### #16 静止的光标不该有光晕
+### #16 A resting caret shouldn't glow
 
-辉光是"运动中"才该有的效果。光标静止时顶着一圈光，看起来像被一个粉色方块框住。
+Glow is an "in motion" effect. A resting caret wearing a ring of light looks like it's boxed in by a pink square.
 
-**做法**：用四角相对目标的最大偏移量（即拖尾展开程度）驱动辉光强度 ——
-偏移 ≤ 0.5px 视为静止、完全跳过绘制，≥ 2.5px 为满强度。
+**The approach**: drive glow intensity by the largest offset of any corner from its target (i.e. how far the trail has unfolded) — offsets ≤ 0.5px count as resting and skip drawing entirely; ≥ 2.5px is full intensity.
 
-过渡区只留 2px 宽，是因为这两个状态本来就隔得很远：
-静止时偏移为 0，而任何真实移动的偏移至少是一个字符宽（约 8px）或一行高（约 32px）。
-**窄区间保证了移动时的辉光与改动前逐像素一致**，同时让停下时的熄灭来得柔和。
+The transition band is only 2px wide because the two states are inherently far apart: at rest the offset is 0, while any real movement produces an offset of at least one character width (~8px) or one line height (~32px). **That narrow band guarantees the in-motion glow is pixel-identical to before**, while letting the fade-out on stopping arrive gently.
 
-### #17 不要写死 `untilBuild`，否则插件"只能在一个 IDE 版本上用"
+### #17 Don't pin `untilBuild`, or the plugin "only works on one IDE version"
 
-早期版本的 `build.gradle.kts` 中写的是：
+An early `build.gradle.kts` had:
 
 ```kotlin
 ideaVersion {
     sinceBuild.set("252")
-    untilBuild.set("252.*")     // ← 元凶
+    untilBuild.set("252.*")     // ← the culprit
 }
 ```
 
-后果是插件**只能在 2025.2 上使用** —— 2024.x、2025.1、2025.3、2026.x 全部被 IDE 拒之门外，
-而用户看到的只有一句"插件与当前 IDE 不兼容"，完全看不出原因。
+The consequence: the plugin **only worked on 2025.2** — 2024.x, 2025.1, 2025.3, and 2026.x were all turned away by the IDE, and all the user saw was "plugin incompatible with this IDE", with no way to tell why.
 
-**机制**：IDE 启动时拿 `build.txt` 里的 build 号去比对插件的
-`since-build` / `until-build` 区间，不在区间内**直接拒绝加载**，
-根本走不到代码执行这一步。所以这**不是 API 兼容性问题，而是元数据声明问题** ——
-一个字的配置，效果等同于"插件只支持一个版本"。
+**The mechanism**: at startup the IDE compares its build number from `build.txt` against the plugin's `since-build` / `until-build` range and **refuses to load** anything outside it — code never even runs. So this **isn't an API compatibility problem, it's a metadata declaration problem**: a one-word config with the effect of "this plugin supports exactly one version".
 
-**正确做法**：若插件不含版本特定代码，**省略 `untilBuild`**（留空即表示适用于所有更新版本）。
-这是 JetBrains 官方建议。
+**The fix**: if the plugin contains no version-specific code, **omit `untilBuild`** (empty means it applies to all newer versions). This is JetBrains' official recommendation.
 
-**如何判断自己是否"含版本特定代码"**：看依赖的 API 是否都是平台核心接口。
-本插件用的是 `Editor` / `CaretListener` / `EditorColors` / `EditorFactoryListener` 等，
-其中"最年轻"的 `EditorKind` 也是 2016.2 就引入的 —— 这种就完全可以不设上限。
+**How to tell whether you "contain version-specific code"**: look at whether the APIs you use are all platform core interfaces. This plugin uses `Editor` / `CaretListener` / `EditorColors` / `EditorFactoryListener` and friends; the "youngest" of them, `EditorKind`, dates to 2016.2 — that kind of dependency needs no upper bound at all.
 
-| 写法 | 后果 |
+| Approach | Consequence |
 |---|---|
-| 写死 `untilBuild` | 每次 IDE 升级都要重新发版，用户才能继续用 |
-| 省略 `untilBuild` | 一次配置长期有效；真有 breaking change 时再收窄也不迟 |
+| Pinning `untilBuild` | Every IDE upgrade requires a fresh release before users can continue |
+| Omitting `untilBuild` | One config, valid long-term; narrow it later if a breaking change actually lands |
 
-**下限则必须实测**：`sinceBuild` 不能凭感觉放宽。除了 API 差异，还要注意**字节码版本** ——
-本例中 2024.1 就是卡在 JBR 17 无法加载 Java 21 字节码上，而非 API 不存在。
+**The lower bound, though, must be tested.** `sinceBuild` can't be loosened on a hunch. Beyond API differences, watch the **bytecode version** — in this case 2024.1 failed because JBR 17 can't load Java 21 bytecode, not because an API was missing.
 
-### #18 "只改内存"不等于"不会落盘"——配色方案被静默污染
+### #18 "Memory-only" doesn't mean "never persisted" — the color scheme got silently polluted
 
-要隐藏原生光标，只能改全局配色方案的 `CARET_COLOR`。这里有个**想当然的推论**：
+Hiding the native caret requires modifying the global scheme's `CARET_COLOR`. There was a **plausible-sounding inference**:
 
-> `setColor()` 只改内存对象、不写文件 → 插件异常退出也不会留下痕迹 → 风险可控。
+> `setColor()` only touches memory and writes no files → the plugin can't leave traces if it crashes → risk is under control.
 
-前半句没错，**后半句是错的**。实际发生的链路：
+The first half is true. **The second half is false.** Here's the actual chain:
 
 ```
-① 插件把内存中的 CARET_COLOR 改成全透明
+① The plugin sets the in-memory CARET_COLOR to fully transparent
         ↓
-② 用户在 Settings 里改了任意一项编辑器设置（本例是字体），点击 OK
+② The user changes any editor setting in Settings (in this case, the font) and clicks OK
         ↓
-③ IntelliJ 保存配色方案时，把【当时的内存状态】整体落盘
-   → colors/_@user_Dark.icls 里多出一行：
+③ IntelliJ saves the color scheme, persisting 【the in-memory state】 wholesale
+   → colors/_@user_Dark.icls gains a line:
       <option name="CARET_COLOR" value="00000000" />
         ↓
-④ 此后无论是否安装插件，光标都是隐形的 —— 坏值已经在磁盘上了
+④ From then on, the caret is invisible whether or not the plugin is installed — the bad value is on disk
 ```
 
-**为什么难以察觉**：它需要"插件正开着"与"用户点了 OK"两件事同时发生。而且
-`partialSave="true"` 的方案文件只记录与父方案的**差异项**，那一行混在正常的字体设置里，
-肉眼扫过去毫无异常。本例中该文件唯一的颜色差异项就是 `CARET_COLOR` —— 这恰恰是关键证据：
-用户只改了字体，光标色是被"顺带"写进去的。
+**Why it's hard to notice**: it requires "plugin running" and "user clicked OK" to coincide. And a `partialSave="true"` scheme file records only the **differences** from its parent, so that line sits among ordinary font settings and looks innocuous. In this case the file's *only* color difference was `CARET_COLOR` — which is precisely the key evidence: the user changed only the font, and the caret color was written along for the ride.
 
-**为什么尤其危险**：**卸载插件无法自愈**。用户遇到的现象是"我都没装插件了，光标还是看不见"，
-排查方向会完全跑偏到 IDE 本身。
+**Why it's especially dangerous**: **uninstalling the plugin won't heal it**. The user's symptom is "I don't even have the plugin installed and the caret is still invisible", sending troubleshooting in entirely the wrong direction.
 
-**修复**：删除该行，让方案回退到父方案的值：
+**The fix**: delete that line so the scheme falls back to its parent's value:
 
 ```xml
 <scheme name="_@user_Dark" version="142" parent_scheme="Darcula">
   <colors>
-    <option name="CARET_COLOR" value="00000000" />   <!-- ← 删掉这一行 -->
+    <option name="CARET_COLOR" value="00000000" />   <!-- ← delete this line -->
   </colors>
 </scheme>
 ```
 
-每个 IDE 版本各存一份（`IntelliJIdea2025.2` / `IntelliJIdea2026.2` / …），**都要改**；
-改之前先关掉 IDE，否则退出时会被内存状态覆盖回去。
+Each IDE version keeps its own copy (`IntelliJIdea2025.2` / `IntelliJIdea2026.2` / …) — **all of them need fixing**. Close the IDE first, or it will overwrite your edit from memory on exit.
 
-**插件侧的防护**：`sanitizeCaretColor()` —— 读到全透明（或 `null`）时不再当作"原始值"保存，
-因为那样"恢复"等于把隐形原样还回去。改用 `getDefaultForeground()` 兜底，
-让用户至少还能看见光标。
+**The plugin-side guard**: `sanitizeCaretColor()` — on reading fully transparent (or `null`), it no longer stores that as the "original value", since "restoring" would just hand the invisibility back. It falls back to `getDefaultForeground()` so the user can at least see a caret.
 
-| 写法 | 关闭插件后 |
+| Approach | After the plugin is switched off |
 |---|---|
-| `savedCaretColor = scheme.getColor(...)` | 恢复成透明 —— **光标还是不出现** |
-| 先经 `sanitizeCaretColor()` 过滤 | 恢复成默认前景色 —— 光标正常 |
+| `savedCaretColor = scheme.getColor(...)` | Restores transparent — **the caret still doesn't appear** |
+| Passing through `sanitizeCaretColor()` first | Restores the default foreground color — the caret works |
 
-**教训**：判断"改动会不会持久化"时，不能只看**自己有没有写文件**，
-还要看**这个对象有没有别的落盘路径**。内存中的全局单例，随时可能被 IDE 自己的保存动作带走。
+**Lesson**: when judging whether a change will persist, don't only ask **whether you wrote a file** — ask **whether the object has any other path to disk**. An in-memory global singleton can be carried off by the IDE's own save actions at any time.
 
 ---
 
-## 已知限制
+## Known Limitations
 
-### 帧率天花板
+### The frame-rate ceiling
 
-**这是本项目最核心的未解问题。**
+**This is the project's core unsolved problem.**
 
-实测帧率在 **20~50fps** 之间波动（峰值可达 105fps）。
+Measured frame rate fluctuates between **20–50fps** (peaking at 105fps).
 
-**根因不在绘制**。曾做过决定性实验——加一个开关**完全跳过所有绘制**，只跑物理计算：
+**The bottleneck is not drawing.** A decisive experiment: add a switch that **skips all drawing** and runs only the physics:
 
 ```
-fps=10.9   （重绘已完全跳过）
+fps=10.9   (redraw fully skipped)
 fps=4.1
 fps=4.0
 fps=2.0
 fps=0.4
 ```
 
-**完全不绘制，帧率依然只有 2~43** —— 证明瓶颈在 **EDT 调度**，与绘制无关。
+**With no drawing at all, the frame rate still sat at 2–43** — proving the bottleneck is **EDT scheduling**, unrelated to drawing.
 
-**机制**：AWT 的 `EventQueue` 中，**原生输入事件（键盘/鼠标）的优先级高于 `invokeLater` 提交的任务**。快速移动光标时，键盘事件与编辑器自身重绘占满了 EDT，我们的渲染任务只能排在后面。
+**The mechanism**: in AWT's `EventQueue`, **native input events (keyboard/mouse) take priority over tasks submitted via `invokeLater`**. When the caret moves quickly, keyboard events and the editor's own repaints saturate the EDT, and our render tasks queue up behind them.
 
-这也解释了那个反直觉的现象：**"编辑器本身不卡，只有光标卡"**。
+This also explains a counterintuitive observation: **"the editor itself isn't laggy, only the caret is"**.
 
-### 另一个反直觉现象
+### Another counterintuitive observation
 
-**大跨度跳转反而比相邻两行流畅。**
+**Long jumps feel smoother than moving between adjacent lines.**
 
-原因有两层：
+Two reasons:
 
-1. **视觉错觉**：同样的帧数下，位移越大，每帧的视觉变化越明显，越不容易察觉顿挫
-2. **算法层**：低帧率时 `dt` 较大，而短距离动画时长恰好与之接近，会被 `DampedSpring.update()` 开头的短路条件 `animationLength <= dt` **整体吃掉** —— 光标瞬间闪到目标，完全没有动画
+1. **Perceptual**: at the same frame count, larger displacements produce more visible change per frame, so stutter is less noticeable
+2. **Algorithmic**: at low frame rates `dt` is large, and short animation durations are close to it, so the early-exit condition `animationLength <= dt` at the top of `DampedSpring.update()` **swallows the animation entirely** — the caret snaps to the target with no animation at all
 
-第 2 点已通过**低帧率动画补偿**（保证至少跨越 6 帧）修复。
+Point 2 is fixed by **low-frame-rate animation compensation** (guaranteeing at least 6 frames are spanned).
 
 ---
 
 ## Roadmap
 
-- [x] **残影轨迹模型** —— 已实现，可通过 `Tools` 菜单与弹簧模型切换
-- [x] **辉光** —— 已实现，随拖尾展开亮起、静止时熄灭（踩坑 #12~#16）
-- [x] **放宽版本兼容** —— 已支持 2024.2 ~ 2026.2+，详见[兼容性](#兼容性)
-- [x] **控制台与终端分类处理** —— 输出区补画静态光标、终端跳过（踩坑 #8）
-- [x] **配色方案污染防护** —— 拒绝把全透明当作原始值保存（踩坑 #18）
-- [ ] **配置界面**：`Settings | Editor | Neovide Cursor`，免改代码调参
-- [ ] **支持 2023 及更早**：需将编译目标降到 Java 17 / 11
-- [ ] **终端支持**：需要单独适配终端的 caret 模型，并解决其原生方块光标
-- [ ] **跨平台验证**：目前仅在 Windows 上实测过
-- [ ] **多编辑器优化**：为分屏/多标签场景做更精细的调度
+- [x] **Afterimage trail model** — implemented; switchable from the `Tools` menu
+- [x] **Glow** — implemented; lights up as the trail unfolds, fades at rest (Lessons #12–#16)
+- [x] **Wider version compatibility** — 2024.2 – 2026.2+; see [Compatibility](#compatibility)
+- [x] **Console vs. terminal handling** — static caret in output areas, terminals skipped (Lesson #8)
+- [x] **Color-scheme pollution guard** — refuses to store fully-transparent as the original value (Lesson #18)
+- [ ] **Settings UI**: `Settings | Editor | Neovide Cursor`, tune parameters without editing code
+- [ ] **Support 2023 and earlier**: requires lowering the compile target to Java 17 / 11
+- [ ] **Terminal support**: needs a separate adaptation to the terminal's caret model, plus solving its native block cursor
+- [ ] **Cross-platform verification**: so far only tested on Windows
+- [ ] **Multi-editor optimization**: finer scheduling for split/multi-tab scenarios
 
 ---
 
-## 致谢
+## Credits
 
-- **原始效果**：Neovide（[neovide.dev](https://neovide.dev/)）
-- **算法蓝本**：VS Code 版 `neovide-cursor.js` —— 本项目的 `DampedSpring` / `TrailCorner` 均逐行移植自它
-- **社区参考**：`intellij-smooth-caret`（平滑光标）、JetBrains 官方 2026.1 的 Smooth Caret（Snappy / Gliding）
+- **Original effect**: Neovide ([neovide.dev](https://neovide.dev/))
+- **Algorithm reference**: the VS Code `neovide-cursor.js` — this project's `DampedSpring` / `TrailCorner` are ported from it line by line
+- **Community references**: `intellij-smooth-caret` (smooth caret), and JetBrains' official Smooth Caret (Snappy / Gliding) in 2026.1
 
-> 说明：JetBrains 官方与社区插件的"平滑光标"都**只有平滑移动、没有拖尾**，因此本项目是独立实现而非适配。
+> Note: both the official and community "smooth caret" plugins offer **smooth movement only, with no trail**, so this project is an independent implementation rather than an adaptation.
 
 ---
 
@@ -616,10 +553,8 @@ fps=0.4
 
 [MIT](LICENSE)
 
-### 关于算法来源
+### On the algorithm's provenance
 
-本项目的拖尾算法（`DampedSpring`、`TrailCorner`）逐行移植自 VS Code 版
-`neovide-cursor`。原项目未附带明确的许可证文件，其作者曾公开表示
-"只要符合开源协议大家可以随意做更多修改和分发"。
+This project's trail algorithm (`DampedSpring`, `TrailCorner`) is ported line by line from the VS Code `neovide-cursor` extension. The original project ships no explicit license file; its author has publicly stated that "anyone may freely modify and distribute it further, as long as it complies with open-source licenses".
 
-若原作者对授权方式有异议，请提 Issue 联系调整。
+If the original author disagrees with this arrangement, please open an issue and it will be adjusted.
