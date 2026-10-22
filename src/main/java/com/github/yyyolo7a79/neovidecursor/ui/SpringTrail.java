@@ -27,9 +27,16 @@ final class SpringTrail {
     private double width;
     private double height;
 
-    /** 上次记录的视觉位置，用于快速路径判断光标是否移动 */
+    /**
+     * 快速路径的缓存键：上次换算坐标时的视觉位置 + 文档修改戳。
+     *
+     * <p>只看 (行, 列) 不够：文字变了但列号恰好没变时（第三方输入法把光标放进
+     * 拼音音节内部，上屏后列号相同但像素位置已变，issue #6），会误判"没移动"、
+     * 覆盖层停在半个字宽处。加上修改戳后，文档一变就强制重算。
+     */
     private int lastLine = Integer.MIN_VALUE;
     private int lastColumn = Integer.MIN_VALUE;
+    private long lastStamp = Long.MIN_VALUE;
 
     /** 目标点刚变化，下一帧需要重新分配角点 rank */
     private boolean jumped = false;
@@ -51,13 +58,14 @@ final class SpringTrail {
         return initialized;
     }
 
-    boolean isAt(int line, int column) {
-        return line == lastLine && column == lastColumn;
+    boolean isAt(int line, int column, long stamp) {
+        return line == lastLine && column == lastColumn && stamp == lastStamp;
     }
 
-    void markAt(int line, int column) {
+    void markAt(int line, int column, long stamp) {
         lastLine = line;
         lastColumn = column;
+        lastStamp = stamp;
     }
 
     /**
@@ -112,9 +120,9 @@ final class SpringTrail {
      *
      * @return true 表示仍在运动
      */
-    boolean update(double dt) {
+    boolean update(double dt, double charWidth) {
         if (jumped) {
-            assignRanks();
+            assignRanks(charWidth);
             jumped = false;
         }
         boolean animating = false;
@@ -139,7 +147,7 @@ final class SpringTrail {
      * （最长时长、最慢）；越靠前 rank 越大、时长越短，最前缘还会触发硬吸附 ——
      * 于是前缘紧跟、后缘拖沓，矩形被拉长成拖尾形状。
      */
-    private void assignRanks() {
+    private void assignRanks(double charWidth) {
         double[] alignment = new double[corners.length];
         for (int i = 0; i < corners.length; i++) {
             alignment[i] = corners[i].calculateDirectionAlignment(width, height, centerX, centerY);
@@ -153,7 +161,7 @@ final class SpringTrail {
                     rank++;
                 }
             }
-            corners[i].jump(width, height, centerX, centerY, rank);
+            corners[i].jump(width, height, centerX, centerY, rank, charWidth);
         }
     }
 }
