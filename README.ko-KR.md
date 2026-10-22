@@ -154,6 +154,7 @@ WebStorm / PhpStorm / GoLand / RubyMine / Rider / DataGrip 등.
 | `animationLength` | `0.1` | 일반 애니메이션 길이(초), 클수록 트레일이 길어짐 |
 | `shortAnimationLength` | `0.05` | 단거리 이동의 애니메이션 길이 |
 | `shortMoveThreshold` | `8` | 단거리 판정 임계값 |
+| `shortMoveMinChars` | `2.5` | 단거리 판정의 가로 방향 하한(단위: 반각 문자 폭). **이번 버전에서 추가**: 큰 글꼴 크기에서도 한자 한 글자를 단거리로 판정 ([#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)) |
 | `trailFactors` | `1 / 0.9 / 0.5 / 0.3` | 네 모서리의 지연 계수(트레일 늘어남의 핵심) |
 | `useHardSnap` / `leadingSnapThreshold` | `true` / `0.5` | 선두 모서리 하드 스냅 |
 | `snapAnimationLength` | `0` | 선두 스냅 시간, `0` = 즉시 밀착 (원본 v1.2.7과 동일, 함정 #20 참고) |
@@ -355,7 +356,7 @@ position = (a + b * dt) * c;    // b에 이미 "속도로 인한 변위"가 포�
 
 **올바른 방법**: 매 tick마다 커서 위치를 다시 읽고, 이벤트는 "고프레임 레이트로 깨어나는" 용도로만 사용합니다. 동시에 가벼운 `getVisualPosition()`으로 빠른 경로를 만들어, 매 프레임 비싼 좌표 변환을 하지 않도록 합니다.
 
-### #6 트레일 최대 길이를 줄여야 함
+### #6 트레일 최대 길이: 한때 4로 줄였으나 현재는 원본의 60으로 복원
 
 원본 JS의 `maxTrailDistanceFactor = 60`(약 1920px)은 Canvas 전체 화면 다시 그리기에서는 문제가 없습니다.
 
@@ -651,6 +652,15 @@ canvas는 이동할 때만 트레일을 겹쳐 그리며, 멈춘 뒤 50ms 후 �
 - [ ] **2023 및 그 이전 버전 지원**: 컴파일 대상을 Java 17 / 11로 낮춰야 함
 - [ ] **터미널 지원**: 터미널의 caret 모델에 대한 별도 적응과, 네이티브 블록 커서 해결 필요
 - [ ] **크로스 플랫폼 검증**: 현재까지 Windows에서만 실측
+
+---
+
+## 기여자
+
+- [@pawamamama](https://github.com/pawamamama) — JFR 샘플링과 프레임 단위 시뮬레이션으로 유휴 상태에서 깨어난 뒤 첫 프레임이 끊기는 문제([#2](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/2), [PR #4](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/pull/4)),
+  큰 글꼴 크기에서 한자가 장거리 이동으로 오판되는 문제([#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)),
+  서드파티 IME에서 오버레이 좌표 캐시가 갱신되지 않는 문제([#6](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/6)) 등을 찾아냈으며,
+  풍부한 실측 데이터를 제공해 주었습니다
 
 ---
 

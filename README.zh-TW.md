@@ -154,6 +154,7 @@ WebStorm / PhpStorm / GoLand / RubyMine / Rider / DataGrip 等。
 | `animationLength` | `0.1` | 一般動畫時長（秒），越大拖尾越長 |
 | `shortAnimationLength` | `0.05` | 短距離移動的動畫時長 |
 | `shortMoveThreshold` | `8` | 短距離判定閾值 |
+| `shortMoveMinChars` | `2.5` | 短距離判定的橫向下限（單位：半形字元寬），**本版新增**：確保大字號下單個漢字仍算短距離（[#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)） |
 | `trailFactors` | `1 / 0.9 / 0.5 / 0.3` | 四角滯後係數（拖尾拉伸的核心） |
 | `useHardSnap` / `leadingSnapThreshold` | `true` / `0.5` | 前緣角硬吸附 |
 | `snapAnimationLength` | `0` | 前緣吸附時長，`0` = 瞬間貼合（對齊原版 v1.2.7，見踩雷 #20） |
@@ -352,7 +353,7 @@ position = (a + b * dt) * c;    // b 裡已含「速度帶來的位移」
 
 **正確做法**：每個 tick 都重新讀取游標位置，事件僅用於「喚醒」到高幀率。同時用輕量的 `getVisualPosition()` 做快速路徑，避免每幀都做耗費成本的座標換算。
 
-### #6 拖尾最大長度要收緊
+### #6 拖尾最大長度：曾收緊到 4，現已恢復原版 60
 
 原版 JS 的 `maxTrailDistanceFactor = 60`（約 1920px），在 Canvas 全螢幕重繪下沒問題。
 
@@ -654,6 +655,15 @@ canvas 只在移動時疊加拖尾，停下 50ms 後淡出**。原版註解還�
 - [ ] **支援 2023 及更早**：需將編譯目標降到 Java 17 / 11
 - [ ] **終端機支援**：需要單獨調適終端機的 caret 模型，並解決其原生方塊游標
 - [ ] **跨平台驗證**：目前僅在 Windows 上實測過
+
+---
+
+## 貢獻者
+
+- [@pawamamama](https://github.com/pawamamama) —— 以 JFR 取樣與逐幀模擬定位了閒置喚醒後的首幀卡頓（[#2](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/2)、[PR #4](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/pull/4)）、
+  大字號下中文被誤判為長距離移動（[#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)）、
+  第三方輸入法下覆蓋層座標快取失效（[#6](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/6)）等問題，
+  並提供了大量實測數據
 
 ---
 

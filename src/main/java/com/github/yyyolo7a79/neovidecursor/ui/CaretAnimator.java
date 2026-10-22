@@ -10,6 +10,7 @@ import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
+import com.intellij.openapi.editor.ex.util.EditorUtil;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JComponent;
@@ -202,6 +203,12 @@ public class CaretAnimator implements Disposable, CaretListener {
     private double cursorWidth;
     private double cursorHeight;
 
+    /**
+     * 半角字符宽（像素），用于短距离判定的横向下限（见 NeovideConfig#shortMoveMinChars）。
+     * 字体/字号变化时 lineHeight 一并变化，届时随之刷新。
+     */
+    private double charWidth;
+
     /** 是否已完成初始化（首帧直接吸附到位，不做入场动画） */
     private boolean initialized = false;
 
@@ -256,10 +263,43 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
     }
 
-    /** 立即切到高帧率并唤醒调度线程（否则最长要等一个 IDLE 周期才响应） */
+    /**
+     * 立即切到高帧率并唤醒调度线程（否则最长要等一个 IDLE 周期才响应）。
+     *
+     * <p><b>必须同时重置 {@link #lastNanos}</b>：空闲档（120ms / 失焦 600ms）期间
+     * {@code tick()} 不跑，{@code lastNanos} 就停在最后一次 tick 上。若只把
+     * {@code currentDelayMs} / {@code nextDueNanos} 归位，唤醒后的<b>第一帧</b>
+     * 仍会用 {@code dt = now - lastNanos} = 整段空闲期来计算，被 {@code MAX_DT}
+     * 截断到约 33.3ms —— 弹簧一帧就走完绝大部分位移，视觉上是"瞬移"。
+     *
+     * <p>以 {@code animationLength = 0.05}、{@code o = 4/animationLength = 80} 为例：
+     * <pre>
+     *   dt = 0.008s（正常）  → c = exp(-0.64) ≈ 0.527  → 一帧后剩 47%
+     *   dt = 0.0333s（空闲后）→ c = exp(-2.67) ≈ 0.070  → 一帧后仅剩 7%
+     * </pre>
+     * 这正是「停手几秒后第一次删除到上一行，会卡一下」的成因；
+     * 而连续快速删除反而流畅 —— 因为那时 {@code lastNanos} 每 8ms 都在更新。
+     *
+     * <p><b>同理还要重置帧间隔估计量 {@link #smoothedIntervalMs}</b>：空闲档的 tick
+     * 间隔（120 / 600ms）也被当作"真实帧间隔"喂给了它。停顿 1 秒后它会涨到约 50ms，
+     * 唤醒后 {@code computeNextDelay()} 据此把调度间隔算成 40ms（25fps），
+     * 还要 0.5~0.7s 才能逐帧收敛回 8ms —— 而一次拖尾动画本身只有 0.05~0.1s，
+     * 整段动画都是以 25fps 播完的。跨越空闲期的那一次测量同样要丢弃。
+     *
+     * <p><b>只在「从空闲档唤醒」时重置</b>（判据是唤醒前所处的档位，而非估计量本身）：
+     * {@code wakeUp()} 每次击键都会被调用，活跃档下 {@code lastNanos} 本就是新的；
+     * 而编辑器繁忙时偏大的估计量正是自适应调度要跟踪的真实输入，不能每次击键都按回 8ms。
+     */
     private void wakeUp() {
+        long now = System.nanoTime();
+        boolean fromIdleTier = currentDelayMs > MAX_ADAPTIVE_DELAY_MS;
+        if (fromIdleTier) {
+            lastNanos = now;
+            smoothedIntervalMs = ACTIVE_DELAY_MS;
+            lastTickNanos = 0L;
+        }
         currentDelayMs = ACTIVE_DELAY_MS;
-        nextDueNanos = System.nanoTime();
+        nextDueNanos = now;
         RenderScheduler.wakeUp();
     }
 
@@ -477,6 +517,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             Caret primary = editor.getCaretModel().getPrimaryCaret();
             double height = editor.getLineHeight();
             double width = config.cursorWidth;
+            long stamp = editor.getDocument().getModificationStamp();
 
             // forceResync：布局刚变化，视觉位置可能没变但像素坐标已失效，必须绕过快速路径
             boolean resync = forceResync;
@@ -502,12 +543,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                 activeTrails.add(trail);
                 previous = trail;
 
-                // 快速路径：视觉位置没变就跳过昂贵的 visualPositionToXY 换算 ——
-                // 高帧率下绝大多数帧光标根本没动
+                // 快速路径：视觉位置与文档都没变就跳过昂贵的 visualPositionToXY 换算 ——
+                // 高帧率下绝大多数帧光标根本没动。修改戳的作用见 SpringTrail#isAt
                 VisualPosition vp = caret.getVisualPosition();
-                if (resync || !trail.isInitialized() || !trail.isAt(vp.line, vp.column)) {
+                if (resync || !trail.isInitialized() || !trail.isAt(vp.line, vp.column, stamp)) {
                     Point p = editor.visualPositionToXY(vp);
-                    trail.markAt(vp.line, vp.column);
+                    trail.markAt(vp.line, vp.column, stamp);
                     if (trail.setTarget(p.x + width / 2.0, p.y + height / 2.0, width, height)) {
                         changed = true;
                     }
@@ -528,6 +569,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             if (height != cursorHeight || width != cursorWidth) {
                 cursorWidth = width;
                 cursorHeight = height;
+                charWidth = EditorUtil.getPlainSpaceWidth(editor);
                 // 辉光半径与重绘余量随光标尺寸同步更新
                 panel.updateGlowRadius(width, height);
                 glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
@@ -593,7 +635,7 @@ public class CaretAnimator implements Disposable, CaretListener {
     private boolean tickSpring(long now, double dt) {
         boolean anyAnimating = false;
         for (SpringTrail trail : activeTrails) {
-            if (trail.update(dt)) {
+            if (trail.update(dt, charWidth)) {
                 anyAnimating = true;
             }
         }

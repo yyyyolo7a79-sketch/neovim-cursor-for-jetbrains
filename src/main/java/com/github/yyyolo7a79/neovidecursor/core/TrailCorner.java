@@ -86,23 +86,31 @@ public class TrailCorner {
      *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
      *
-     * @param rank 按对齐度升序的名次：0 = 最靠后（拿 trailFactors[0]=1，最慢），
-     *             3 = 最靠前（最跟手）。与原 JS 版排序方式一致
+     * @param rank      按对齐度升序的名次：0 = 最靠后（拿 trailFactors[0]=1，最慢），
+     *                  3 = 最靠前（最跟手）。与原 JS 版排序方式一致
+     * @param charWidth 半角字符宽（像素），用于短距离判定的横向下限；传 0 表示退回原版判据
      */
-    public void jump(double width, double height, double centerX, double centerY, int rank) {
+    public void jump(double width, double height, double centerX, double centerY,
+                     int rank, double charWidth) {
         double destX = destX(centerX, width);
         double destY = destY(centerY, height);
 
-        // 用「光标自身尺寸」归一化位移，得到以"光标个数"为单位的位移量，
-        // 这样阈值语义与光标字体大小无关
-        double jumpX = (destX - previousDestX) / width;
+        // 用「光标自身尺寸」归一化位移，得到以"光标个数"为单位的位移量。
+        // 这组值只用于求运动方向（与原版一致），短距离判定见下方
+        double dx = destX - previousDestX;
+        double jumpX = dx / width;
         double jumpY = (destY - previousDestY) / height;
 
         double len = Math.hypot(jumpX, jumpY);
         double jumpNormX = len != 0 ? jumpX / len : 0;
         double jumpNormY = len != 0 ? jumpY / len : 0;
 
-        boolean isShortMove = len <= config.shortMoveThreshold;
+        // 短距离判定：横向单位取「光标宽」与「按字符宽折算」中的较大者，
+        // 使纯横向阈值 = max(16px, shortMoveMinChars × 字符宽)，随字号缩放。
+        // 否则大字号下单个汉字就会被判成长距离（见 NeovideConfig#shortMoveMinChars）
+        double shortUnitX = Math.max(width,
+                charWidth * config.shortMoveMinChars / config.shortMoveThreshold);
+        boolean isShortMove = Math.hypot(dx / shortUnitX, jumpY) <= config.shortMoveThreshold;
         double baseTime = isShortMove ? config.shortAnimationLength : config.animationLength;
 
         // 运动方向与该角方向的夹角余弦
