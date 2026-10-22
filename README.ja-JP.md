@@ -154,6 +154,7 @@ WebStorm / PhpStorm / GoLand / RubyMine / Rider / DataGrip など —— で動�
 | `animationLength` | `0.1` | 通常のアニメーション時間（秒）。大きいほどトレイルが長くなる |
 | `shortAnimationLength` | `0.05` | 短距離移動のアニメーション時間 |
 | `shortMoveThreshold` | `8` | 短距離判定のしきい値 |
+| `shortMoveMinChars` | `2.5` | 短距離判定の横方向の下限（単位：半角文字幅）。**本バージョンで追加**：大きなフォントサイズでも漢字 1 文字を短距離として扱う（[#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)） |
 | `trailFactors` | `1 / 0.9 / 0.5 / 0.3` | 四隅の遅延係数（トレイル伸長の中核） |
 | `useHardSnap` / `leadingSnapThreshold` | `true` / `0.5` | 前縁の角のハードスナップ |
 | `snapAnimationLength` | `0` | 前縁スナップの時間。`0` = 瞬時に吸着（原本 v1.2.7 に合わせる。落とし穴 #20 を参照） |
@@ -352,7 +353,7 @@ position = (a + b * dt) * c;    // b には「速度による変位」がすで�
 
 **正しい方法**：毎ティックごとにカーソル位置を読み直し、イベントは「高フレームレートへの起床」にのみ使います。同時に軽量な `getVisualPosition()` でファストパスを設け、毎フレーム高コストな座標変換を行わないようにします。
 
-### #6 トレイルの最大長は厳しく絞るべき
+### #6 トレイルの最大長：一度 4 に絞ったが、現在は原本の 60 に戻した
 
 原本の JS は `maxTrailDistanceFactor = 60`（約 1920px）で、Canvas の全画面再描画では問題ありません。
 
@@ -654,6 +655,15 @@ canvas は移動中だけトレイルを重ね、停止から 50ms 後にフェ�
 - [ ] **2023 以前のサポート**：コンパイルターゲットを Java 17 / 11 に下げる必要がある
 - [ ] **ターミナル対応**：ターミナルの caret モデルへの個別対応と、そのネイティブなブロックカーソルの解決が必要
 - [ ] **クロスプラットフォーム検証**：現時点では Windows でのみ実機検証済み
+
+---
+
+## コントリビューター
+
+- [@pawamamama](https://github.com/pawamamama) — JFR サンプリングとフレーム単位のシミュレーションで、アイドル復帰後の初回フレームのカクつき（[#2](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/2)、[PR #4](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/pull/4)）、
+  大きなフォントサイズで漢字が長距離移動と誤判定される問題（[#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)）、
+  サードパーティ IME 使用時にオーバーレイの座標キャッシュが古くなる問題（[#6](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/6)）などを特定し、
+  豊富な実測データを提供してくれました
 
 ---
 

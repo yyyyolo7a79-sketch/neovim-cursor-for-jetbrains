@@ -142,6 +142,7 @@ Every parameter lives in `core/NeovideConfig.java`, named and behaving identical
 | `animationLength` | `0.1` | Normal animation duration (seconds); larger = longer trail |
 | `shortAnimationLength` | `0.05` | Duration for short moves |
 | `shortMoveThreshold` | `8` | Short-move threshold |
+| `shortMoveMinChars` | `2.5` | Horizontal floor of the short-move test, in half-width character widths. **New in this version**: keeps a single CJK character a short move at large font sizes ([#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)) |
 | `trailFactors` | `1 / 0.9 / 0.5 / 0.3` | Per-corner lag factors (the heart of trail stretching) |
 | `useHardSnap` / `leadingSnapThreshold` | `true` / `0.5` | Hard snap for leading corners |
 | `snapAnimationLength` | `0` | Leading-corner snap duration; `0` = snaps instantly (matches the original v1.2.7 — see Lesson #20) |
@@ -316,7 +317,7 @@ In scenarios like deleting text, the caret event may fire **before** `visualPosi
 
 **The fix**: re-read the caret position every tick, and use events only to "wake up" into a high frame rate. Also use the cheap `getVisualPosition()` as a fast path, so you're not doing an expensive coordinate conversion every frame.
 
-### #6 Tighten the maximum trail length
+### #6 Max trail length: once tightened to 4, now back to the original 60
 
 The original JS uses `maxTrailDistanceFactor = 60` (~1920px), which is fine when Canvas repaints the whole screen.
 
@@ -575,6 +576,15 @@ erasing the trail's stretch, a cost far greater than the benefit (see Lesson #20
 - [ ] **Support 2023 and earlier**: requires lowering the compile target to Java 17 / 11
 - [ ] **Terminal support**: needs a separate adaptation to the terminal's caret model, plus solving its native block cursor
 - [ ] **Cross-platform verification**: so far only tested on Windows
+
+---
+
+## Contributors
+
+- [@pawamamama](https://github.com/pawamamama) — used JFR sampling and frame-by-frame simulation to pin down the first-frame stutter after waking from idle ([#2](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/2), [PR #4](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/pull/4)),
+  CJK characters being misclassified as long moves at large font sizes ([#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)),
+  and the overlay's coordinate cache going stale under third-party IMEs ([#6](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/6)),
+  backed by extensive measurements
 
 ---
 
