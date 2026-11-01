@@ -1,6 +1,9 @@
 package com.github.yyyolo7a79.neovidecursor.ui;
 
+import com.github.yyyolo7a79.neovidecursor.core.CursorSettings;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
+import com.github.yyyolo7a79.neovidecursor.settings.NeovideSettings;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
@@ -44,8 +47,11 @@ public class NeovideCaretManager implements EditorFactoryListener {
     /** 每个编辑器对应一个动画控制器 */
     private static final Map<Editor, CaretAnimator> ANIMATORS = new ConcurrentHashMap<>();
 
-    /** 全局配置（后续可接入 Settings 持久化） */
+    /** 全局运行时配置：首次使用时由 {@link NeovideSettings} 写入持久化的值 */
     private static final NeovideConfig CONFIG = new NeovideConfig();
+
+    /** 持久化设置是否已载入，见 {@link #ensureSettingsLoaded()} */
+    private static volatile boolean settingsLoaded = false;
 
     private static volatile boolean enabled = true;
 
@@ -93,33 +99,138 @@ public class NeovideCaretManager implements EditorFactoryListener {
     }
 
     public static NeovideConfig getConfig() {
+        ensureSettingsLoaded();
         return CONFIG;
     }
 
     public static boolean isEnabled() {
+        ensureSettingsLoaded();
         return enabled;
+    }
+
+    // ==================== 设置（持久化 / 设置页） ====================
+
+    /**
+     * 首次使用前载入持久化设置（幂等）。
+     *
+     * <p>先置位再取服务：取服务会同步触发 loadState → {@link #loadSettings}，
+     * 先置位可防重入。启动阶段只写配置字段、不碰 Swing，任意线程调用都安全。
+     */
+    private static void ensureSettingsLoaded() {
+        if (settingsLoaded) {
+            return;
+        }
+        settingsLoaded = true;
+        try {
+            NeovideSettings.getInstance();
+        } catch (Throwable t) {
+            LOG.warn("neovide-cursor: 读取设置失败，沿用默认值", t);
+        }
+    }
+
+    /**
+     * 由 {@link NeovideSettings#loadState} 调用。
+     *
+     * <p>启动时（尚未挂载任何编辑器）只需写字段；运行中被重新加载（如设置同步）
+     * 则回到 EDT 完整应用，挂载范围的变化也一并处理。
+     */
+    public static void loadSettings(CursorSettings s) {
+        settingsLoaded = true;
+        if (!initialScanDone && ANIMATORS.isEmpty()) {
+            s.applyTo(CONFIG);
+            enabled = s.enabled;
+            return;
+        }
+        ApplicationManager.getApplication().invokeLater(() -> applySettings(s));
+    }
+
+    /** 当前生效设置的快照（设置页与持久化保存都读它） */
+    public static CursorSettings currentSettings() {
+        ensureSettingsLoaded();
+        return CursorSettings.capture(CONFIG, enabled);
+    }
+
+    /**
+     * 应用设置页提交的参数（Apply / OK，在 EDT 上调用）。
+     *
+     * <p>总开关与「隐藏原生光标」会改变挂载范围（叠加模式不接管控制台），
+     * 这两项变化时整体卸载再重装，与 {@link #setHideNativeCaret} 同理；
+     * 其余参数只改字段，再通知各编辑器刷新缓存的派生值。
+     */
+    public static void applySettings(CursorSettings s) {
+        ensureSettingsLoaded();
+        boolean remount = s.enabled != enabled || s.hideNativeCaret != CONFIG.hideNativeCaret;
+        if (remount) {
+            if (enabled) {
+                setEnabled(false);
+            }
+            s.applyTo(CONFIG);
+            if (s.enabled) {
+                setEnabled(true);
+            }
+            return;
+        }
+
+        boolean modeChanged = s.trailMode != CONFIG.trailMode;
+        s.applyTo(CONFIG);
+        for (CaretAnimator animator : ANIMATORS.values()) {
+            if (modeChanged) {
+                animator.onModeChanged();
+            }
+            animator.onConfigChanged();
+        }
+    }
+
+    /**
+     * 原生光标「本来」的颜色：隐藏模式下取改动前保存的值。
+     * 设置页的预览编辑器用独立配色，靠它决定显示什么颜色的原生光标。
+     */
+    public static Color visibleCaretColor() {
+        Color saved = savedCaretColor;
+        if (saved != null) {
+            return saved;
+        }
+        try {
+            EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+            Color current = scheme.getColor(EditorColors.CARET_COLOR);
+            if (current != null && current.getAlpha() > 0) {
+                return current;
+            }
+            Color fg = scheme.getDefaultForeground();
+            if (fg != null && fg.getAlpha() > 0) {
+                return fg;
+            }
+        } catch (Throwable ignored) {
+            // 配色方案不可用时用兜底色
+        }
+        return FALLBACK_CARET_COLOR;
     }
 
     // ==================== 编辑器生命周期 ====================
 
     @Override
     public void editorCreated(@NotNull EditorFactoryEvent event) {
-        if (!enabled) {
-            return;
-        }
+        ensureSettingsLoaded();
 
         // 插件重启时，之前已打开的编辑器不会触发 editorCreated，
         // 借第一次回调的机会把它们一并补建，避免"只有新开的文件才有拖尾"
         if (!initialScanDone) {
             initialScanDone = true;
-            if (!CONFIG.hideNativeCaret) {
+            // 自愈放在开关判断之前：总开关现在会持久化，插件以关闭状态启动时
+            // 原生光标就是唯一的光标，旧版本遗留的透明色同样必须修好
+            if (!enabled || !CONFIG.hideNativeCaret) {
                 repairPollutedCaretColor();
             }
-            for (Editor existing : EditorFactory.getInstance().getAllEditors()) {
-                install(existing);
+            if (enabled) {
+                for (Editor existing : EditorFactory.getInstance().getAllEditors()) {
+                    install(existing);
+                }
             }
         }
 
+        if (!enabled) {
+            return;
+        }
         install(event.getEditor());
     }
 
@@ -242,6 +353,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
     }
 
     public static NeovideConfig.TrailMode getTrailMode() {
+        ensureSettingsLoaded();
         return CONFIG.trailMode;
     }
 

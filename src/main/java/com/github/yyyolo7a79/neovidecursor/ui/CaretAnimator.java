@@ -344,7 +344,10 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         boolean moved = refreshTarget();
 
+        // 以下两种情况本帧不绘制，调度间隔要退回空闲档：否则在活跃档（8ms）被切到后台的编辑器
+        // 会一直按 8ms 空转，直到重新显示 —— 设置页 Apply 会唤醒所有编辑器，正好触发这种情况
         if (!initialized) {
+            currentDelayMs = IDLE_DELAY_MS;
             return;
         }
 
@@ -352,6 +355,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 否则拖尾会停在一个错误的位置，看起来就是"光标莫名悬浮"。
         if (!content.isShowing()) {
             panel.clearCorners();
+            currentDelayMs = IDLE_DELAY_MS;
             return;
         }
 
@@ -773,7 +777,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         panel.setOverlayAlpha(1f);
-        if (moved || hasTail) {
+        // 面板被清空过（如设置变更后）也要重画，否则常驻光标要等下次移动才出现
+        if (moved || hasTail || !panel.hasContent()) {
             panel.updateGhosts(ghostBuffer);
             computeGhostBounds(currentBounds);
             submitRepaint();
@@ -840,6 +845,27 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 让下一帧强制重算位置，避免快速路径把旧状态固化
         forceResync = true;
         lastDirtyRegion.setBounds(0, 0, 0, 0);
+        wakeUp();
+    }
+
+    /**
+     * 设置变更后调用：刷新本编辑器缓存的派生值，下一帧即按新参数绘制。
+     *
+     * <p>动画时长、淡出、辉光强度等参数每帧现读，无需处理；要刷新的只有缓存值 ——
+     * 颜色、残影寿命、辉光半径与重绘余量，以及快速路径记住的光标宽度。
+     */
+    public void onConfigChanged() {
+        panel.refreshStyles();
+        afterimageTrail.setLifetime(config.afterimageLifetime);
+
+        // 尺寸缓存置零：下一帧 refreshTarget 视为尺寸变化，重算辉光半径与重绘余量；
+        // forceResync 让各光标按新的光标宽度重新定位
+        cursorHeight = 0;
+        forceResync = true;
+
+        // 擦掉旧样式画出的最后一帧；常驻光标（隐藏模式 / 控制台）会在下一帧按新样式重画
+        panel.clearCorners();
+        submitClear();
         wakeUp();
     }
 
