@@ -38,7 +38,7 @@ While the caret moves:
 
 Parameter semantics match the VS Code `neovide-cursor` extension, so configs stay portable across platforms (one deliberate exception — see [Configuration](#configuration)).
 
-### Two trail models (switchable from the menu at any time)
+### Two trail models (switchable from the settings page at any time)
 
 | Model | How it works | Notes |
 |---|---|---|
@@ -116,23 +116,27 @@ The good news: **lower bytecode loads fine on newer JBRs** — lowering the targ
 
 ## Usage
 
-- **Toggle**: `Tools` menu → `Neovide 拖尾光标（开关）`
-- **Switch trail model**: `Tools` menu → `Neovide 光标：残影模式（低帧率更稳）`
-  - **Checked** = afterimage mode; **unchecked** = spring mode (the original Neovide effect)
+- **Settings page**: `Settings | Tools | Neovide Cursor`, or `Tools` menu → `Neovide 光标：设置…`
+  - A live preview (with syntax highlighting) sits at the top; changes affect only the preview until you click `Apply`, after which they take effect in every editor
+  - Adjust colors, opacity, glow, trail duration, fade-out, and more; the `恢复默认` button restores the recommended 0.5.1 configuration
+  - Settings are stored in `options/neovide-cursor.xml` under the IDE's config directory
+- **Toggle**: `Tools` menu → `Neovide 拖尾光标`
+- **Switch trail model**: settings page → `拖尾模型`
+  - `弹簧拉伸` = spring mode (default, the original Neovide effect); `残影` = afterimage mode (steadier at low frame rates)
   - **Takes effect immediately**, no restart needed
-- **Hide native caret**: `Tools` menu → `Neovide 光标：隐藏原生光标（常驻绘制）`
+- **Hide native caret**: settings page → `隐藏原生光标`
   - **Unchecked (default)** = keep the native caret; the trail only shows while moving — **recommended**
   - **Checked** = the plugin draws a permanent caret (no blinking, colored with `tailColor`), but following depends on EDT scheduling and the frame rate drops noticeably in practice
-- **Performance diagnostics**: `Tools` menu → `Neovide 光标：性能诊断（禁用重绘）`
+- **Performance diagnostics**: press `Ctrl+Shift+A` (Find Action) and search for `Neovide 光标：性能诊断（禁用重绘）`
   - Skips all drawing and runs only the physics. Use it to tell "slow drawing" apart from "slow scheduling" — **a genuinely useful troubleshooting tool**
 
-Turning the toggle off instantly restores the native caret and removes the overlay.
+Turning the toggle off instantly restores the native caret and removes the overlay. The `隐藏原生光标` and `残影模式` actions can also be found through Find Action and bound to keyboard shortcuts.
 
 ---
 
 ## Configuration
 
-Every parameter lives in `core/NeovideConfig.java`, named and behaving identically to `cursorConfig` in the VS Code `neovide-cursor.js`:
+Common parameters can be tuned on the settings page. Every parameter lives in `core/NeovideConfig.java`, named and behaving identically to `cursorConfig` in the VS Code `neovide-cursor.js`:
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -142,7 +146,7 @@ Every parameter lives in `core/NeovideConfig.java`, named and behaving identical
 | `animationLength` | `0.1` | Normal animation duration (seconds); larger = longer trail |
 | `shortAnimationLength` | `0.05` | Duration for short moves |
 | `shortMoveThreshold` | `8` | Short-move threshold |
-| `shortMoveMinChars` | `2.5` | Horizontal floor of the short-move test, in half-width character widths. **New in this version**: keeps a single CJK character a short move at large font sizes ([#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)) |
+| `shortMoveMinChars` | `2.5` | Horizontal floor of the short-move test, in half-width character widths. **New in 0.5.1**: keeps a single CJK character a short move at large font sizes ([#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5)) |
 | `trailFactors` | `1 / 0.9 / 0.5 / 0.3` | Per-corner lag factors (the heart of trail stretching) |
 | `useHardSnap` / `leadingSnapThreshold` | `true` / `0.5` | Hard snap for leading corners |
 | `snapAnimationLength` | `0` | Leading-corner snap duration; `0` = snaps instantly (matches the original v1.2.7 — see Lesson #20) |
@@ -152,7 +156,7 @@ Every parameter lives in `core/NeovideConfig.java`, named and behaving identical
 | `glowLayers` / `glowOpacity` | `12` / `0.55` | Glow layer count and peak intensity (**layer count doesn't change brightness** — see "Simulating the glow" below) |
 
 > Apart from `shadowBlurFactor`, this table matches the original `cursorConfig` **item for item**.
-> If the halo feels too large or too small, tune that single number:
+> If the halo feels too large or too small, tune that single number (shown as `辉光大小` on the settings page):
 > `0.15` ≈ 12px total glow width (hugging the caret) / `0.2` default ≈ 15px / `0.3` ≈ 21px / `0.6` (the original value) ≈ 40px.
 
 ---
@@ -533,6 +537,16 @@ The `fps=0.4–10.9` numbers in the old README's "Known Limitations" came from e
 
 > **Lesson**: before drawing conclusions from diagnostic data, verify the measurement method itself.
 
+### #22 Background tabs got stuck spinning at the high-frequency tier
+
+`tick()` returned early when the editor was not visible or not yet initialized, skipping the "compute the next scheduling interval" step.
+A tab switched away from mid-animation therefore stayed at the 8ms tier, running about 100 empty frames per second until it was brought back to the foreground.
+Clicking `Apply` on the 0.6.0 settings page wakes every editor, which turned an occasional problem into one that reproduced every time.
+
+**The fix**: both early-return paths now reset the scheduling interval to the idle tier (120ms) before returning.
+
+> **Lesson**: in adaptive scheduling, every early-return path must also set the next interval.
+
 ---
 
 ## Known Limitations
@@ -564,7 +578,7 @@ erasing the trail's stretch, a cost far greater than the benefit (see Lesson #20
 
 ## Roadmap
 
-- [x] **Afterimage trail model** — implemented; switchable from the `Tools` menu
+- [x] **Afterimage trail model** — implemented; switchable from the settings page
 - [x] **Glow** — implemented; lights up as the trail unfolds, fades at rest (Lessons #12–#16)
 - [x] **Wider version compatibility** — 2024.2 – 2026.2+; see [Compatibility](#compatibility)
 - [x] **Console vs. terminal handling** — static caret in output areas, terminals skipped (Lesson #8)
@@ -572,7 +586,7 @@ erasing the trail's stretch, a cost far greater than the benefit (see Lesson #20
 - [x] **Overlay mode that keeps the native caret** — matches the original's default behavior (Lesson #19)
 - [x] **Multi-caret trails** — `Alt` + drag column selection, etc.; each caret gets its own trail (up to 64)
 - [x] **Merged multi-editor scheduling** — all editors share a single scheduler thread
-- [ ] **Settings UI**: `Settings | Editor | Neovide Cursor`, tune parameters without editing code
+- [x] **Settings UI** — `Settings | Tools | Neovide Cursor`, with a live preview; tune parameters without editing code
 - [ ] **Support 2023 and earlier**: requires lowering the compile target to Java 17 / 11
 - [ ] **Terminal support**: needs a separate adaptation to the terminal's caret model, plus solving its native block cursor
 - [ ] **Cross-platform verification**: so far only tested on Windows

@@ -15,35 +15,44 @@
     <extensions defaultExtensionNs="com.intellij">
         <!-- 拖尾光标主入口：为每个编辑器挂载动画覆盖层 -->
         <editorFactoryListener implementation="com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager"/>
+
+        <!-- 设置页：Settings | Tools | Neovide Cursor（颜色、辉光、拖尾时长可视化调整，带实时预览） -->
+        <applicationConfigurable parentId="tools"
+                                 id="com.github.yyyolo7a79.neovidecursor.settings"
+                                 displayName="Neovide Cursor"
+                                 instance="com.github.yyyolo7a79.neovidecursor.settings.NeovideSettingsConfigurable"/>
     </extensions>
 
     <actions>
         <action id="NeovideCursor.Toggle"
                 class="com.github.yyyolo7a79.neovidecursor.ui.ToggleNeovideAction"
-                text="Neovide 拖尾光标（开关）"
+                text="Neovide 拖尾光标"
                 description="启用或禁用拖尾光标效果；关闭时会恢复原生光标">
             <add-to-group group-id="ToolsMenu" anchor="first"/>
         </action>
 
+        <action id="NeovideCursor.Settings"
+                class="com.github.yyyolo7a79.neovidecursor.ui.OpenSettingsAction"
+                text="Neovide 光标：设置…"
+                description="打开 Settings | Tools | Neovide Cursor，可视化调整颜色、辉光与拖尾时长">
+            <add-to-group group-id="ToolsMenu" anchor="after" relative-to-action="NeovideCursor.Toggle"/>
+        </action>
+
+        <!-- 以下三项不进菜单：前两项设置页里已有，性能诊断是开发调试用的开关。
+             动作仍然注册，可用 Find Action（Ctrl+Shift+A）搜到，也能绑定快捷键 -->
         <action id="NeovideCursor.HideNativeCaret"
                 class="com.github.yyyolo7a79.neovidecursor.ui.ToggleHideNativeCaretAction"
                 text="Neovide 光标：隐藏原生光标（常驻绘制）"
-                description="勾选后由插件常驻绘制光标（不闪烁）；不勾选则保留原生光标、拖尾仅在移动时显示（与 VS Code 版默认一致）">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
+                description="勾选后由插件常驻绘制光标（不闪烁）；不勾选则保留原生光标、拖尾仅在移动时显示（与 VS Code 版默认一致）"/>
 
         <action id="NeovideCursor.PaintDiag"
                 class="com.github.yyyolo7a79.neovidecursor.ui.TogglePaintDiagAction"
                 text="Neovide 光标：性能诊断（禁用重绘）"
-                description="跳过重绘只跑计算，用于分离瓶颈：是绘制慢还是 EDT 调度慢">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
+                description="跳过重绘只跑计算，用于分离瓶颈：是绘制慢还是 EDT 调度慢"/>
 
         <action id="NeovideCursor.TrailMode"
                 class="com.github.yyyolo7a79.neovidecursor.ui.ToggleTrailModeAction"
                 text="Neovide 光标：残影模式（低帧率更稳）"
-                description="勾选切换到残影轨迹模型（记录真实历史位置，掉帧不失真）；取消则回到弹簧拉伸模型（Neovide 原版效果）">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
+                description="勾选切换到残影轨迹模型（记录真实历史位置，掉帧不失真）；取消则回到弹簧拉伸模型（Neovide 原版效果）"/>
     </actions>
 </idea-plugin>
